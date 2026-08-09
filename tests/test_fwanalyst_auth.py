@@ -89,8 +89,9 @@ def test_unified_server_aggregates_all_tools():
 
 
 def test_context_module_exports_allowed_adoms_var():
-    from fwanalyst_server.context import allowed_adoms_var
     from contextvars import ContextVar
+
+    from fwanalyst_server.context import allowed_adoms_var
     assert isinstance(allowed_adoms_var, ContextVar)
 
 
@@ -328,7 +329,8 @@ def test_tool_schemas_unchanged_by_logging_wrapper():
     from mcp.server.fastmcp import FastMCP
 
     from fortimanager_mcp import server as fmg
-    from fwanalyst_server.server import _logged, mcp as unified
+    from fwanalyst_server.server import _logged
+    from fwanalyst_server.server import mcp as unified
     from zone_mcp import server as zone
 
     raw = FastMCP(name="schema-baseline")

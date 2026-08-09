@@ -6,6 +6,22 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run ruff (unused imports/vars, undefined names, import order)
+        run: |
+          pip install ruff
+          ruff check .
+
   build-dev-image:
     runs-on: ubuntu-latest
     steps:

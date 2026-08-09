@@ -140,6 +140,7 @@ def _start_catalog_warmup(creds: dict) -> None:
 
     def _warm_once(client, adoms: list[str], label: str) -> None:
         from concurrent.futures import ThreadPoolExecutor, as_completed
+
         from fortimanager_mcp.query import build_catalogs, build_policy_snapshot
 
         logger.info("Cache warm-up (%s): refreshing %d ADOM(s) in parallel", label, len(adoms))

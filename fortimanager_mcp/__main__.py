@@ -1,4 +1,5 @@
 import os
+
 from fortimanager_mcp.server import mcp
 
 transport = os.getenv("MCP_TRANSPORT", "stdio")

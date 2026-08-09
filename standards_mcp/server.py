@@ -143,12 +143,12 @@ def check_traffic(
       governing_rules : list of matching policy rule objects
       note            : str  (guidance when verdict is UNKNOWN)
     """
-    from standards_mcp.policy_engine import (
-        find_matching_policies,
-        evaluate,
-        ancestor_zones,
-    )
     import re as _re
+
+    from standards_mcp.policy_engine import (
+        evaluate,
+        find_matching_policies,
+    )
 
     db = _load_policy_db()
     zones = db["zones"]

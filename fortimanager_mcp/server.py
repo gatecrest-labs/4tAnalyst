@@ -40,6 +40,9 @@ import yaml
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
+from fortimanager_mcp import client as _client_module
+from fortimanager_mcp import query as _query
+from fwanalyst_server.context import allowed_adoms_var
 from mcp_common.errors import safe_error
 from mcp_common.validation import (
     ValidationError,
@@ -47,10 +50,6 @@ from mcp_common.validation import (
     validate_device_name,
     validate_object_name,
 )
-
-from fwanalyst_server.context import allowed_adoms_var
-from fortimanager_mcp import client as _client_module
-from fortimanager_mcp import query as _query
 
 logger = logging.getLogger(__name__)
 

@@ -14,10 +14,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fortimanager_mcp.matching import (
     PortRange,
-    parse_service_request,
     ServiceCatalog,
+    parse_service_request,
 )
-
 
 # ---------------------------------------------------------------------------
 # PortRange

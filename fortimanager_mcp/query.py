@@ -15,16 +15,19 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
-from mcp_common.errors import safe_error
-
-from fortimanager_mcp.client import FortiManagerClient, FortiManagerAPIError
+from fortimanager_mcp.client import FortiManagerAPIError, FortiManagerClient
 from fortimanager_mcp.matching import (
     AddressCatalog,
     PolicyMatcher,
     ServiceCatalog,
     parse_service_request,
 )
-from fortimanager_mcp.zone_map import load_zone_map, lookup_policy_zone, missing_entries, zone_map_file_exists
+from fortimanager_mcp.zone_map import (
+    load_zone_map,
+    lookup_policy_zone,
+    zone_map_file_exists,
+)
+from mcp_common.errors import safe_error
 
 logger = logging.getLogger(__name__)
 

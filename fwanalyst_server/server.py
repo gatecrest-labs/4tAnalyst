@@ -50,6 +50,7 @@ def _load_credentials() -> dict:
 
 def _build_fmg_client():
     from fgplanner.models import PlannerDataError
+
     from fortimanager_mcp.client import FortiManagerClient
 
     cfg = _load_credentials().get("fortimanager", {})
@@ -72,6 +73,7 @@ def _build_fmg_client():
 
 def _build_zone_client():
     from fgplanner.models import PlannerDataError
+
     from zone_mcp.client import ZonePolicyClient
 
     cfg = _load_credentials().get("zone_policy", {})
@@ -92,7 +94,10 @@ def _register_fgplanner_clients() -> None:
     factories aren't invoked until plan_change() actually needs a client, so
     there's no I/O cost to calling this on every plan_change() invocation.
     """
-    from fgplanner.clients import register_fmg_client_factory, register_zone_client_factory
+    from fgplanner.clients import (
+        register_fmg_client_factory,
+        register_zone_client_factory,
+    )
 
     register_fmg_client_factory(_build_fmg_client)
     register_zone_client_factory(_build_zone_client)
@@ -185,7 +190,8 @@ def plan_change(
     verdicts, rename objects, or edit CLI text. If warnings mention degraded
     FortiManager data, lead with that when presenting.
     """
-    from fgplanner.engine import plan_change as _plan, to_report_payload
+    from fgplanner.engine import plan_change as _plan
+    from fgplanner.engine import to_report_payload
     from fgplanner.models import PlannerDataError, TargetFirewall
 
     _register_fgplanner_clients()
@@ -228,10 +234,10 @@ _ANNOTATIONS = {
 
 
 def _register_existing_tools() -> None:
-    from standards_mcp import server as standards
-    from fortimanager_mcp import server as fmg
     from feedback_mcp import server as feedback
+    from fortimanager_mcp import server as fmg
     from intake_mcp import server as intake
+    from standards_mcp import server as standards
     from zone_mcp import server as zone
 
     for fn in (

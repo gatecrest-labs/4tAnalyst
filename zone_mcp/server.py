@@ -28,7 +28,7 @@ import yaml
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-from zone_mcp.client import ZonePolicyClient, ZonePolicyError
+from zone_mcp.client import ZonePolicyClient
 
 logger = logging.getLogger(__name__)
 

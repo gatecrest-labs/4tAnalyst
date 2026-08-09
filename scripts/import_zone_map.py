@@ -43,7 +43,7 @@ def _load_creds(creds_path: Path) -> dict:
 def _build_client(creds_path: Path):
     # Import here so missing optional deps don't break CSV / export modes
     try:
-        from fortimanager_mcp.client import FortiManagerClient, FortiManagerAPIError
+        from fortimanager_mcp.client import FortiManagerAPIError, FortiManagerClient
     except ImportError as exc:
         print(
             f"ERROR: Could not import fortimanager_mcp.client: {exc}\n"

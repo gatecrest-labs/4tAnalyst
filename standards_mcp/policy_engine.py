@@ -9,7 +9,6 @@ import ipaddress
 import re
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Port → service name aliases (used for "block only" service matching)
 # ---------------------------------------------------------------------------

@@ -34,7 +34,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-from intake_mcp.parser import parse_spreadsheet, parse_manual_entry
+from intake_mcp.parser import parse_manual_entry, parse_spreadsheet
 
 logger = logging.getLogger(__name__)
 
