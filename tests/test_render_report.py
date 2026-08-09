@@ -11,7 +11,7 @@ def _minimal_payload(**overrides):
     payload = {
         "ticket_id": None,
         "request": {
-            "src": "10.20.20.0/24", "dst": "198.51.100.7/32", "service": "https",
+            "src": "10.20.20.0/24", "dst": "10.1.1.7/32", "service": "https",
             "justification": "test", "firewalls": ["FortiWiFi-71G"],
         },
         "zone_verdict": {
@@ -89,7 +89,7 @@ def test_render_conf_blocked_exception_includes_banner_and_commands():
         "status": "blocked_exception",
         "per_firewall": [{
             "firewall": "FortiWiFi-71G",
-            "address_objects": [{"cli": "config firewall address\nedit \"H_198.51.100.7\"\nend"}],
+            "address_objects": [{"cli": "config firewall address\nedit \"H_10.1.1.7\"\nend"}],
             "policy": {"cli": "config firewall policy\nedit 0\nend", "name": "x"},
             "warnings": ["destination interface mismatch: example warning"],
         }],
@@ -137,7 +137,7 @@ def test_render_html_contains_key_sections_and_values():
     assert "<!DOCTYPE html>" in output
     assert "CHG0012345" in output
     assert "10.20.20.0/24" in output
-    assert "198.51.100.7/32" in output
+    assert "10.1.1.7/32" in output
     assert "BLOCKED" in output
     assert "verdict-blocked" in output
     assert "Zone Policy Verdict" in output
@@ -252,7 +252,7 @@ def test_render_html_existing_rules_show_rule_detail_table():
     """Each rule in Existing Rules must show src/dst/service objects, not just ID."""
     payload = _minimal_payload(
         existing_rules={
-            "SITE01-CORE-FW01": {
+            "MNHQGOFWENTM01": {
                 "status": "ALREADY COVERED",
                 "rules": [
                     {
@@ -309,7 +309,7 @@ def test_render_html_partial_matches_shown_separately():
     """Partial matches must be visually separated from covering rules."""
     payload = _minimal_payload(
         existing_rules={
-            "SITE01-CORE-FW01": {
+            "MNHQGOFWENTM01": {
                 "status": "NEW RULE",
                 "rules": [
                     {

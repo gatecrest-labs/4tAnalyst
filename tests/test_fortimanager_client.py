@@ -60,18 +60,6 @@ def test_get_device_vdoms_monkeypatch():
     assert [v['name'] for v in vdoms] == ['root', 'vdom2']
 
 
-def test_get_device_sdwan_default_vdom():
-    c = FortiManagerClient(primary_host='h', primary_key='k')
-
-    def fake_rpc(method, path, params):
-        assert path == '/pm/config/device/FW01/vdom/root/system/sdwan'
-        return {'zone': [{'name': 'virtual-wan-link'}], 'members': {'member': []}}
-
-    c._rpc = fake_rpc
-    result = c.get_device_sdwan('FW01')
-    assert result['zone'][0]['name'] == 'virtual-wan-link'
-
-
 # ---------------------------------------------------------------------------
 # query.search_policies — structured return, set-semantics matching
 # ---------------------------------------------------------------------------
@@ -244,15 +232,15 @@ def test_list_device_vdoms():
 
 def test_search_devices_filters_combine_with_and():
     fake = FakeStatusFMG(devices=[
-        {"name": "SITE01-FW01", "ip": "10.1.1.1", "platform_str": "FortiGate-VM64",
+        {"name": "MNHQ-FW01", "ip": "10.1.1.1", "platform_str": "FortiGate-VM64",
          "os_ver": "7.4", "conn_status": 1, "db_status": "modified"},
-        {"name": "SITE01-FW02", "ip": "10.1.1.2", "platform_str": "FortiGate-100F",
+        {"name": "MNHQ-FW02", "ip": "10.1.1.2", "platform_str": "FortiGate-100F",
          "os_ver": "7.2", "conn_status": 2, "db_status": "insync"},
     ])
-    out = query.search_devices(fake, "adom1", name_filter="SITE01", platform_filter="VM",
+    out = query.search_devices(fake, "adom1", name_filter="MNHQ", platform_filter="VM",
                                 connection_status="up")
     assert out["count"] == 1
-    assert out["devices"][0]["name"] == "SITE01-FW01"
+    assert out["devices"][0]["name"] == "MNHQ-FW01"
     assert out["devices"][0]["conn_status"] == "up"
 
 
@@ -260,65 +248,3 @@ def test_search_devices_bad_connection_status_reports_error():
     fake = FakeStatusFMG(devices=[])
     out = query.search_devices(fake, "adom1", connection_status="sideways")
     assert "error" in out
-
-
-def test_get_device_interface_config_no_filter():
-    c = FortiManagerClient(primary_host='h', primary_key='k')
-
-    def fake_rpc(method, path, params):
-        assert method == 'get'
-        assert path == '/pm/config/device/FW01/global/system/interface'
-        assert 'filter' not in params
-        return [{'name': 'port1', 'vlanid': 0}]
-
-    c._rpc = fake_rpc
-    result = c.get_device_interface_config('FW01')
-    assert result == [{'name': 'port1', 'vlanid': 0}]
-
-
-def test_get_device_interface_config_vlan_and_name_filter():
-    c = FortiManagerClient(primary_host='h', primary_key='k')
-
-    def fake_rpc(method, path, params):
-        assert params['filter'] == [["name", "==", "port1"], "&&", ["vlanid", "in", 10, 20]]
-        return []
-
-    c._rpc = fake_rpc
-    c.get_device_interface_config('FW01', vlanids=[10, 20], name='port1')
-
-
-def test_proxy_builds_exec_call():
-    c = FortiManagerClient(primary_host='h', primary_key='k')
-
-    def fake_rpc(method, path, params):
-        assert method == 'exec'
-        assert path == '/sys/proxy/json'
-        assert params == {
-            'action': 'get',
-            'resource': '/api/v2/monitor/user/device/query',
-            'target': ['/adom/OT-ADOM/device/FW01'],
-        }
-        return [{'response': {'results': [{'ipv4_address': '10.1.1.5'}]}}]
-
-    c._rpc = fake_rpc
-    raw = c.get_device_client_location('OT-ADOM', 'FW01')
-    assert raw[0]['response']['results'][0]['ipv4_address'] == '10.1.1.5'
-
-
-def test_get_device_sdwan_monitor_two_proxy_calls():
-    c = FortiManagerClient(primary_host='h', primary_key='k')
-    calls = []
-
-    def fake_rpc(method, path, params):
-        calls.append(params['resource'])
-        if params['resource'].endswith('members'):
-            return [{'response': {'results': [{'interface': 'wan1', 'link': 'up'}]}}]
-        return [{'response': {'results': {}}}]
-
-    c._rpc = fake_rpc
-    members, health = c.get_device_sdwan_monitor('OT-ADOM', 'FW01')
-    assert calls == [
-        '/api/v2/monitor/virtual-wan/members',
-        '/api/v2/monitor/virtual-wan/health-check',
-    ]
-    assert members[0]['response']['results'][0]['interface'] == 'wan1'

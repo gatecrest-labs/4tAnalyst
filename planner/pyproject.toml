@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "planner"
+version = "0.1.0"
+description = "Deterministic firewall change planner — computes change plans (objects, rules, insertion point, CLI) without an LLM"
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml>=6.0",
+    "httpx>=0.27.0",
+    "requests>=2.31",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["planner"]

@@ -5,16 +5,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     ca-certificates \
-    git \
   && rm -rf /var/lib/apt/lists/*
 
 ENV PYTHONUNBUFFERED=1
 WORKDIR /opt/4tanalyst
-
-# Non-root runtime user. UID 1000 matches the default first-user UID on most
-# Linux hosts, so the dev docker-compose bind mount (./:/opt/4tanalyst) keeps
-# working without a manual chown on the host side in the common case.
-RUN groupadd -g 1000 app && useradd -u 1000 -g app -m -s /bin/bash app
 
 # Install uv and editable packages
 COPY mcp_common/ mcp_common/
@@ -23,9 +17,9 @@ COPY fortimanager_mcp/ fortimanager_mcp/
 COPY feedback_mcp/ feedback_mcp/
 COPY intake_mcp/ intake_mcp/
 COPY zone_mcp/ zone_mcp/
+COPY planner/ planner/
 COPY fwanalyst_server/ fwanalyst_server/
 COPY scripts/ scripts/
-COPY constraints.txt constraints.txt
 # Note: standards_mcp/policy_db.json and standards_mcp/policy-data/ (real
 # TUFIN CSV exports) are gitignored and not shipped in this repo — the
 # COPY standards_mcp/ standards_mcp/ line above already picks them up if
@@ -36,16 +30,8 @@ COPY constraints.txt constraints.txt
 
 RUN python -m pip install --upgrade pip setuptools wheel
 RUN python -m pip install uv
-RUN python -m pip install -c constraints.txt -e mcp_common/ -e standards_mcp/ -e fortimanager_mcp/ -e feedback_mcp/ -e intake_mcp/ -e zone_mcp/ \
-    -e fwanalyst_server/
-
-# output/ (report.html/implementation.conf) and feedback.db both write to
-# the repo root at runtime (see feedback_mcp/server.py _DEFAULT_DB and
-# scripts/render_report.py --outdir default) — create/own them before
-# dropping root so the app user can write both under the bind mount too.
-RUN mkdir -p output && chown -R app:app /opt/4tanalyst
-
-USER app
+RUN python -m pip install -e mcp_common/ -e standards_mcp/ -e fortimanager_mcp/ -e feedback_mcp/ -e intake_mcp/ -e zone_mcp/ \
+    -e planner/ -e fwanalyst_server/
 
 EXPOSE 8000
 

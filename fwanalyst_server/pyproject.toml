@@ -11,11 +11,7 @@ dependencies = [
     "mcp[cli]>=1.0.0,<2.0.0",
     "pyyaml>=6.0",
     "uvicorn>=0.30",
-    "fortigate-change-planner @ git+https://github.com/Alski-MPLS/fortigate-change-planner.git@9f239658542e2575441a7db779a472ef02fc5d32",
 ]
-
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["fwanalyst_server"]
