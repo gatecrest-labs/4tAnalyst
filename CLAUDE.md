@@ -4,27 +4,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Purpose
 
-4tAnalyst is a Python-based AI assistant that automates firewall rule request analysis for a regulated, critical-infrastructure organization. It exposes MCP (Model Context Protocol) servers so Claude Code can validate firewall requests against company network segmentation policy, naming conventions, and approval workflows — eliminating the need for engineers to manually check policy matrices and routing requests.
+4tAnalyst is a Python-based AI assistant that automates firewall rule request analysis for an energy utility. It exposes MCP (Model Context Protocol) servers so Claude Code can validate firewall requests against company network segmentation policy, naming conventions, and approval workflows — eliminating the need for engineers to manually check policy matrices and routing requests.
 
 ## Commands
 
 ```bash
 # Install all packages (run from repo root)
 uv pip install -e mcp_common/ -e standards_mcp/ -e fortimanager_mcp/ -e feedback_mcp/ \
-    -e intake_mcp/ -e zone_mcp/ -e fwanalyst_server/
+    -e intake_mcp/ -e zone_mcp/ -e planner/ -e fwanalyst_server/
 
-# Recommended way to exercise the planner in this repo: the plan_change MCP
-# tool via fwanalyst_server (see below) — it registers client factories built
-# from this repo's credentials.yaml in fwanalyst_server/server.py, so
-# FortiManager/zone-policy connectivity is already wired.
-#
-# fgplanner also ships its own standalone CLI (no LLM, no server), but it
-# ships no default clients and reads no credentials.yaml (by design — see
-# fgplanner/clients.py in the fortigate-change-planner repo). Running
-# `python -m fgplanner` directly from within 4tAnalyst will fail with a
-# "no FortiManager client configured" error unless you first register your
-# own client factories per that package's docs; it is not a substitute for
-# the wired connectivity check below.
+# Run the deterministic planner directly (no LLM, no server needed)
+uv run python -m planner --src 10.1.2.3 --dst 10.9.8.7 --service tcp/8443 \
+    --firewall MNHQ-FW01:OT-ADOM --ticket CHG0012345 [--json-only]
 
 # Unified server, stdio mode (development / debug)
 uv run python -m fwanalyst_server
@@ -43,9 +34,8 @@ docker compose up            # uses docker-compose.yml (mounts repo for live edi
 docker compose -f docker-compose.ci.yml up  # CI image — no mounts
 
 # Unit tests
-pytest -q tests/             # runs all tests in this repo (no live systems needed)
-# The planner's own engine/insertion/cli_gen/standards tests live in the
-# fortigate-change-planner repo, not here — see its tests/ directory.
+pytest -q tests/             # runs all tests (no live systems needed)
+pytest -q tests/test_engine.py tests/test_insertion.py  # just the planner
 
 # Rebuild policy_db.json after TUFIN CSV exports change
 uv run python standards_mcp/build_policy_db.py
@@ -56,7 +46,7 @@ uv run python scripts/run_smoke.py
 
 ## Architecture
 
-**Core design rule: the LLM orchestrates, code computes.** All correctness-critical analysis (rule coverage, object reuse, insertion point, CLI generation) lives in the deterministic planning core, published separately as [`fortigate-change-planner`](https://github.com/Alski-MPLS/fortigate-change-planner) (importable module `fgplanner`) and installed as a dependency of `fwanalyst_server`. In production, one process (`fwanalyst_server`, port 8000, streamable-HTTP + bearer auth) aggregates every tool including `plan_change`. The per-domain packages below remain individually runnable over stdio for development.
+**Core design rule: the LLM orchestrates, code computes.** All correctness-critical analysis (rule coverage, object reuse, insertion point, CLI generation) lives in the deterministic `planner/` package. In production, one process (`fwanalyst_server`, port 8000, streamable-HTTP + bearer auth) aggregates every tool including `plan_change`. The per-domain packages below remain individually runnable over stdio for development.
 
 `netbrain_mcp` is planned but not yet started. `servicenow_mcp` is not planned — ServiceNow has no available read-only API; intake is handled by `intake_mcp`. The system targets Fortinet (FortiManager) exclusively.
 
@@ -64,6 +54,7 @@ uv run python scripts/run_smoke.py
 
 | Package | Status | Description |
 |---|---|---|
+| `planner` | **Complete** | **Deterministic change planner** — the product core. `plan_change()` computes verdict, coverage, reuse, insertion, CLI. Also a standalone CLI (`python -m planner`) |
 | `fwanalyst_server` | **Complete** | Unified MCP server (port 8000, streamable-HTTP, static-bearer auth, fail-closed) aggregating all tools + `plan_change` |
 | `standards_mcp` | **Complete** | Zone matrix, naming.yaml, review_requirements.yaml, static policy evaluation |
 | `fortimanager_mcp` | **Complete** | Read-only FortiManager JSON-RPC queries (7.4/7.6) + `matching.py` set-semantics layer |
@@ -73,24 +64,22 @@ uv run python scripts/run_smoke.py
 | `mcp_common` | **Complete** | Shared input validation, sanitized errors, and log masking used by fortimanager_mcp |
 | `netbrain_mcp` | **Planned** | Automated path discovery — blocked on NetBrain API access |
 
-### Deterministic planning core (external dependency)
+### planner/ (deterministic core)
 
-The deterministic planning core now lives in the separate
-[`fortigate-change-planner`](https://github.com/Alski-MPLS/fortigate-change-planner)
-package (importable module `fgplanner`), installed as a dependency of
-`fwanalyst_server` rather than bundled in this repo. `fwanalyst_server/server.py`
-imports `plan_change`/`to_report_payload` from `fgplanner.engine` and
-`PlannerDataError`/`TargetFirewall` from `fgplanner.models`. See that repo for
-`engine.py`, `fetch.py`, `insertion.py`, `standards.py`, `cli_gen.py`, and its
-own standalone CLI (`python -m fgplanner`) and test suite.
+- **`engine.py`** — `plan_change(src, dst, service, firewalls, justification, ticket_id, src_group="", dst_group="", fmg_client=None, zone_client=None)` → `ChangePlan`; `to_report_payload(plan)` emits the exact `render_report.py` schema. **Consolidated multi-value requests**: `src`/`dst`/`service` each accept a single value, a comma-separated string, or a list — call the planner ONCE per request; it emits ONE policy per firewall covering every combination. Zone verdicts are computed per src×dst×service combination: any UNKNOWN → `unknown_no_action`; mixed ALLOWED+BLOCKED → `PlannerDataError("request", …split the request…)`. Sides with more than 3 members (`GROUP_THRESHOLD`), or with an explicit `src_group`/`dst_group` name, get a dedicated address group (default `GRP_<ticket>_SRC/DST`). "Already covered" requires EVERY src×dst pair fully covered (possibly by different rules); partial coverage adds an overlap warning. When a near-miss rule would cover the flow if the missing endpoint(s) were appended to a group it references, the plan carries a `GroupAppendAlternative` (Option B, `members` list) with an ADOM-wide blast-radius list of every other rule referencing that group (directly or via nesting); never offered for negated sides. Decision table: UNKNOWN verdict → `unknown_no_action`; BLOCKED → `blocked_exception`; ALLOWED + every device fully covered (enabled, unconditional, non-degraded) → `already_covered`; else `new_rule`.
+- **`fetch.py`** — `DeviceSnapshot` (packages, ordered policies, catalogs, interfaces), `fetch_zone_verdict`, `resolve_interfaces`/`resolve_interface`. Failures raise typed `PlannerDataError(source, detail)`; per-package failures set `degraded` — a degraded device is never claimed "already covered". IPs 4THealth cannot resolve default to the catch-all **Internet** zone (with a note) and the verdict is re-derived from the live policy table; any flow touching the Internet zone is critical risk with the `allow_internet_inbound`/`allow_internet_outbound` logging profile.
+- **`insertion.py`** — `plan_insertion(...)` first-match shadowing analysis → insert-before policy ID + rationale + `shadowed_by`/`would_shadow`.
+- **`standards.py`** — risk level (unknown zone fails safe to critical), `rule_type_for` logging profile mapping, naming/policy-name generation, review requirements. `permissiveness_warnings()` runs a least-privilege review of the request itself (any-source/any-destination, CIDRs wider than /16, ANY service, port ranges spanning >1024 ports; any/any/any gets an explicit reject-or-rescope warning) — warnings only, surfaced on every plan. A wildcard service request reuses FortiGate's built-in `ALL` object instead of generating a service-object CLI.
+- **`cli_gen.py`** — exact FortiGate CLI blocks; `<TICKET_ID>` placeholders substituted by render_report.
+- **`__main__.py`** — standalone CLI; exit 2 on data-source failure.
 
 ### fwanalyst_server/
 
-- **`server.py`** — single FastMCP aggregating all 35 per-package tools (via `add_tool`) + `plan_change` (36 total; `tests/test_fwanalyst_auth.py` asserts the count — update it when adding tools). Every tool is wrapped at `add_tool` time in a `_logged()` decorator (one INFO access-log line per call: tool name + token label, never args/tokens) and given a `ToolAnnotations` (34 `readOnlyHint=True`; `record_feedback`/`flag_for_review` are `readOnlyHint=False`, mutating).
-- **`context.py`** — Thin shared module: exports `allowed_adoms_var: ContextVar[set[str]]` and `token_label_var: ContextVar[str]` (default `"-"`, so stdio mode logs cleanly with no HTTP middleware setting it). Lives here (not in `auth.py`) so `fortimanager_mcp` can import `allowed_adoms_var` without a circular dependency.
-- **`auth.py`** — `require_bearer(app, token, creds=None)` ASGI wrapper; constant-time compare; fail-closed (`AuthConfigError` on empty token). When `creds` is provided, resolves the bearer token to an allowed ADOM set via `_resolve_allowed_adoms()` and to a human-readable label via `_resolve_token_label()` (access-logging only, never an authz input), injecting both into `allowed_adoms_var`/`token_label_var` for the duration of each request. Named per-engineer tokens from `server.tokens` are accepted in addition to the primary admin token.
-- **`rate_limit.py`** — `rate_limit(app, max_requests, window_seconds)` ASGI wrapper; per-`Mcp-Session-Id` sliding-window call budget, `429` past the limit (defaults 300 req/60s, `FW_ANALYST_RATE_LIMIT_MAX`/`FW_ANALYST_RATE_LIMIT_WINDOW_SECONDS`, `MAX=0` disables). Emptied session buckets are pruned; tracked buckets are capped at 1000 with least-recently-active eviction (memory hygiene — the limiter is behind auth, so keying is unchanged). Applied inside `require_bearer` in `__main__.py` so unauthenticated requests never consume budget.
-- **`__main__.py`** — `MCP_TRANSPORT=stdio` (default) or `http` (uvicorn + streamable_http_app, path `/mcp`). In HTTP mode also sets `transport_security` (DNS-rebinding protection, `FW_ANALYST_ALLOWED_HOSTS` or `credentials.yaml` `server.allowed_hosts`) — unset keeps the MCP SDK's localhost-only default, which rejects real engineer traffic once deployed to a real hostname. Loads full `credentials.yaml` and passes it to `require_bearer` so per-engineer ADOM restrictions are enforced. Refuses to start HTTP mode when `credentials.yaml` is group/world-accessible (warns instead in stdio mode). Supports direct uvicorn TLS via `FW_ANALYST_SSL_CERTFILE`/`FW_ANALYST_SSL_KEYFILE` env vars or `credentials.yaml` `server.ssl_certfile`/`ssl_keyfile` (env wins, both-or-neither — a half-set pair refuses to start).
+- **`server.py`** — single FastMCP aggregating all 31 per-package tools (via `add_tool`) + `plan_change` (32 total; `tests/test_fwanalyst_auth.py` asserts the count — update it when adding tools).
+- **`context.py`** — Thin shared module: exports `allowed_adoms_var: ContextVar[set[str]]`. Lives here (not in `auth.py`) so `fortimanager_mcp` can import it without a circular dependency.
+- **`auth.py`** — `require_bearer(app, token, creds=None)` ASGI wrapper; constant-time compare; fail-closed (`AuthConfigError` on empty token). When `creds` is provided, resolves the bearer token to an allowed ADOM set via `_resolve_allowed_adoms()` and injects it into `allowed_adoms_var` for the duration of each request. Named per-engineer tokens from `server.tokens` are accepted in addition to the primary admin token.
+- **`rate_limit.py`** — `rate_limit(app, max_requests, window_seconds)` ASGI wrapper; per-`Mcp-Session-Id` sliding-window call budget, `429` past the limit (defaults 300 req/60s, `FW_ANALYST_RATE_LIMIT_MAX`/`FW_ANALYST_RATE_LIMIT_WINDOW_SECONDS`, `MAX=0` disables). Applied inside `require_bearer` in `__main__.py` so unauthenticated requests never consume budget.
+- **`__main__.py`** — `MCP_TRANSPORT=stdio` (default) or `http` (uvicorn + streamable_http_app, path `/mcp`). In HTTP mode also sets `transport_security` (DNS-rebinding protection, `FW_ANALYST_ALLOWED_HOSTS` or `credentials.yaml` `server.allowed_hosts`) — unset keeps the MCP SDK's localhost-only default, which rejects real engineer traffic once deployed to a real hostname. Loads full `credentials.yaml` and passes it to `require_bearer` so per-engineer ADOM restrictions are enforced.
 
 ### Critical data-source warning
 
@@ -131,10 +120,10 @@ own standalone CLI (`python -m fgplanner`) and test suite.
 - `get_interface_map(adom, device)` — interface-to-zone assignments
 - `get_routing_table(adom, device)` — static routes for path analysis
 - `list_device_vdoms(adom, device)` — VDOMs configured on a device
-- `get_device_interface_config(adom, device, vlanids=None, name=None)` — device-DB interface config, optionally filtered by VLAN id(s)/name
-- `get_device_client_location(adom, device, ip="", mac="", hostname="")` — locate a client in detected-inventory (FortiAP/FortiSwitch port, VLAN, online state)
-- `get_device_sdwan(adom, device, vdom="root")` — device-DB SD-WAN config (zones, members, health-checks)
-- `get_device_sdwan_monitor(adom, device)` — live SD-WAN runtime status (per-member link state/bandwidth, per-health-check SLA)
+- `get_device_interface_config(adom, device, vdom)` — Device-DB interface config with VLAN filtering
+- `get_device_client_location(adom, device, ip, mac, hostname)` — locate a client on detected-client inventory
+- `get_device_sdwan(adom, device, vdom)` — Device-DB SD-WAN config (zones, members, health-checks)
+- `get_device_sdwan_monitor(adom, device)` — live SD-WAN runtime status (link state, bandwidth, SLA)
 
 FortiManager version flag in `credentials.yaml` controls `version: "7.4"` vs `"7.6"` policy path behaviour.
 
@@ -218,14 +207,14 @@ Coverage: 40+ zones (OT, CIP-H, IT, Gas, Users, Internet domains), 74 explicit z
 
 Unit tests live in `tests/`. Run with `pytest -q tests/`. Test files:
 - `tests/test_matching.py` — PortRange/catalog/PolicyMatcher set semantics (pure logic)
+- `tests/test_insertion.py` — first-match shadowing/insertion analysis (pure logic)
+- `tests/test_planner_standards.py` — risk/logging/naming decision rules
+- `tests/test_engine.py` — planner models, fetch layer, and `plan_change` end-to-end with fake clients; payload validated against `render_report.validate_payload`
+- `tests/test_cli_gen.py` — exact-string FortiGate CLI assertions
 - `tests/test_fwanalyst_auth.py` — bearer middleware, ADOM token resolution, ContextVar injection, tool-aggregation count
 - `tests/test_fortimanager_adom_guard.py` — `_require_adom()` logic and `get_adoms()` filtering
 - `tests/test_rate_limit.py` — per-session call-budget middleware (window expiry, per-session isolation, 429 + Retry-After)
 - `tests/test_policy_engine.py`, `tests/test_fortimanager_client.py`, `tests/test_zone_client.py`, `tests/test_zone_map.py`, `tests/test_render_report.py` — pre-existing suites
-
-The planner's own tests (engine, insertion, cli_gen, standards) live in the
-[`fortigate-change-planner`](https://github.com/Alski-MPLS/fortigate-change-planner)
-repo, not here.
 
 CI (`smoke-tests.yml`) runs `unit-tests` (full `pytest -q tests/` with all packages installed) and `smoke-tests` (containerised auth-aware checks via `scripts/run_smoke.py` against the unified server).
 
@@ -262,8 +251,6 @@ server:
       label: "engineer-name" # for logs/audit only
       adoms: ["OT-ADOM"]     # restrict to these ADOMs; ["*"] = unrestricted
   allowed_hosts: []          # host-header allowlist for DNS-rebinding protection
-  ssl_certfile: ""           # optional: direct uvicorn TLS (both-or-neither with ssl_keyfile; env wins)
-  ssl_keyfile: ""
 
 zone_policy:
   base_url: "https://4thealth.internal.example.com"
@@ -272,15 +259,16 @@ zone_policy:
   timeout: 30.0
 ```
 
-## Known limitations before production
+## Key blocking items before production
 
-1. **Test FortiManager connectivity** — credentials added, not yet fully validated against live FMG (the `plan_change` MCP tool, via `uv run python -m fwanalyst_server`, is the quickest end-to-end check — it registers the client factories fgplanner needs from `credentials.yaml`; running `python -m fgplanner` directly is NOT a substitute unless you've separately wired your own client factories)
-2. **TLS** — no longer blocked on nginx: `fwanalyst_server/__main__.py` supports direct uvicorn TLS via `FW_ANALYST_SSL_CERTFILE`/`FW_ANALYST_SSL_KEYFILE` (see `docs/tls-setup.md`); still required before production in any regulated environment (NERC CIP, HIPAA, PCI-DSS, etc.) — pick direct uvicorn or nginx and enable it
+See `todo.md` for the full list. Top blockers:
+1. **Test FortiManager connectivity** — credentials added, not yet fully validated against live FMG (planner CLI is the quickest end-to-end check)
+2. **TLS / nginx reverse proxy** — bearer auth now enforced on port 8000, but transport is still plain HTTP; TLS termination required in any regulated environment (NERC CIP, HIPAA, PCI-DSS, etc.)
 3. **AI inference path decision** — Bedrock vs. Anthropic direct vs. self-hosted (compliance implications for regulated/sensitive data differ)
 4. **Compliance team engagement** — longest lead time item for deployments touching regulated data (NERC CIP, HIPAA, PCI-DSS, or your organization's own data-classification policy)
 5. **IT/InfoSec approval for Claude Code on workstations**
 6. **Populate real values** in `naming.yaml` and `review_requirements.yaml`
-7. **Document zone-name mapping** — 4THealth zone names differ from FortiManager ADOM zone names; a mapping reference is not yet included in this repo
+7. **Create `docs/zone-name-mapping.md`** — 4THealth zone names differ from FortiManager ADOM zone names
 
 ## Engineer slash commands (.claude/skills/)
 
@@ -301,6 +289,8 @@ zone_policy:
 
 ## Key reference files
 
+- `todo.md` — comprehensive gap tracker and open questions
+- `highlevel-4tanalyst.md` — problem statement, success metrics, risk register
 - `docs/compliance.md` — regime-agnostic data-sensitivity/compliance analysis (NERC CIP, HIPAA, PCI-DSS, SOX, GDPR) and inference path comparison
 - `docs/engineer-workflow.md` — end-to-end how-to for engineers
 - `docs/workstation-onboarding.md` — one-page laptop setup for engineers doing the sparse checkout (clone/config/verify only)

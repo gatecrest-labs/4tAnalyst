@@ -26,10 +26,7 @@ env/
 credentials.yaml
 device_zone_map.yaml
 
-# Engineer bearer token, per docs/workstation-onboarding.md
-.mcp.json
-
-# Real internal zone names
+# Real internal zone names (internal mapping of FMG ADOM zones to 4THealth zones)
 docs/zone-name-mapping.md
 
 # Real network segmentation data (subnets, zones, site names) — never commit.
@@ -44,6 +41,9 @@ docs/test-results/
 # Claude Code local/session state — machine-specific, not project config
 .claude/worktrees/
 .claude/settings.local.json
+# Engineer MCP config contains bearer tokens — never commit
+.claude/mcp_servers.json
+.mcp.json
 
 # Internal planning docs — not needed for public consumption, may reuse
 # real-looking lab data from design sessions

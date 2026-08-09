@@ -14,9 +14,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fortimanager_mcp.matching import (
     PortRange,
-    ServiceCatalog,
     parse_service_request,
+    ServiceCatalog,
 )
+
 
 # ---------------------------------------------------------------------------
 # PortRange
@@ -403,7 +404,7 @@ def test_matcher_wildcard_request_src():
 
 def _nested_catalog():
     return AddressCatalog(
-        objects=[{"name": "H_A", "type": "ipmask", "subnet": "198.51.100.7 255.255.255.255"}],
+        objects=[{"name": "H_A", "type": "ipmask", "subnet": "10.1.1.7 255.255.255.255"}],
         groups=[
             {"name": "G_INNER", "member": ["H_A"]},
             {"name": "G_OUTER", "member": ["G_INNER"]},

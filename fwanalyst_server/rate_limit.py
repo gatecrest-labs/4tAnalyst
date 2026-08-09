@@ -15,13 +15,6 @@ from collections import deque
 
 _NO_SESSION = b"__no_session__"
 
-# Upper bound on tracked session buckets. Buckets are pruned when they empty,
-# but a client that never reuses a session id would still grow the dict
-# unboundedly; past this many live buckets the least-recently-active one is
-# evicted (worst case it costs that session its in-window history, never its
-# access — the limiter is behind auth, so this is memory hygiene, not a guard).
-_MAX_TRACKED_SESSIONS = 1000
-
 
 class RateLimitConfigError(ValueError):
     """Raised when rate limiting is configured with invalid parameters."""
@@ -48,17 +41,11 @@ def rate_limit(app, max_requests: int, window_seconds: float):
         session_id = headers.get(b"mcp-session-id", _NO_SESSION)
 
         now = time.monotonic()
-        window = windows.get(session_id)
-        if window is not None:
-            while window and now - window[0] > window_seconds:
-                window.popleft()
-            # Drop the bucket entirely once its window is empty — an idle
-            # session must not keep a dict entry alive forever.
-            if not window:
-                del windows[session_id]
-                window = None
+        window = windows.setdefault(session_id, deque())
+        while window and now - window[0] > window_seconds:
+            window.popleft()
 
-        if window is not None and len(window) >= max_requests:
+        if len(window) >= max_requests:
             body = json.dumps({
                 "error": "rate_limited",
                 "detail": f"Session exceeded {max_requests} requests per "
@@ -74,14 +61,6 @@ def rate_limit(app, max_requests: int, window_seconds: float):
             })
             await send({"type": "http.response.body", "body": body})
             return
-
-        if window is None:
-            if len(windows) >= _MAX_TRACKED_SESSIONS:
-                # Evict the bucket whose most recent request is the oldest.
-                # Every tracked deque is non-empty by the invariant above.
-                stalest = min(windows, key=lambda key: windows[key][-1])
-                del windows[stalest]
-            window = windows.setdefault(session_id, deque())
 
         window.append(now)
         await app(scope, receive, send)

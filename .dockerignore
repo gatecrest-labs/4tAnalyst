@@ -1,7 +1,0 @@
-.git
-.venv
-__pycache__
-*.pyc
-.env
-credentials.yaml
-ci-logs

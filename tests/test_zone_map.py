@@ -1,3 +1,4 @@
+import pytest
 from fortimanager_mcp import zone_map
 
 
@@ -13,7 +14,7 @@ def test_load_zone_map_valid_file(tmp_path):
         "  FGT-OT-01:\n"
         "    port3:\n"
         "      alias: OT_LAN\n"
-        "      policy_zone: NETZONE OT-All\n"
+        "      policy_zone: NSS OT-All\n"
         "      notes: ''\n"
     )
     result = zone_map.load_zone_map(f)
@@ -21,7 +22,7 @@ def test_load_zone_map_valid_file(tmp_path):
         "FGT-OT-01": {
             "port3": {
                 "alias": "OT_LAN",
-                "policy_zone": "NETZONE OT-All",
+                "policy_zone": "NSS OT-All",
                 "notes": "",
             }
         }
@@ -31,17 +32,17 @@ def test_load_zone_map_valid_file(tmp_path):
 def test_lookup_policy_zone_found(tmp_path):
     zone_map_data = {
         "FGT-OT-01": {
-            "port3": {"alias": "OT_LAN", "policy_zone": "NETZONE OT-All", "notes": ""}
+            "port3": {"alias": "OT_LAN", "policy_zone": "NSS OT-All", "notes": ""}
         }
     }
     result = zone_map.lookup_policy_zone(zone_map_data, "FGT-OT-01", "port3")
-    assert result == "NETZONE OT-All"
+    assert result == "NSS OT-All"
 
 
 def test_lookup_policy_zone_device_missing():
     zone_map_data = {
         "FGT-OT-01": {
-            "port3": {"alias": "OT_LAN", "policy_zone": "NETZONE OT-All", "notes": ""}
+            "port3": {"alias": "OT_LAN", "policy_zone": "NSS OT-All", "notes": ""}
         }
     }
     result = zone_map.lookup_policy_zone(zone_map_data, "FGT-MISSING", "port3")
@@ -51,7 +52,7 @@ def test_lookup_policy_zone_device_missing():
 def test_lookup_policy_zone_interface_missing():
     zone_map_data = {
         "FGT-OT-01": {
-            "port3": {"alias": "OT_LAN", "policy_zone": "NETZONE OT-All", "notes": ""}
+            "port3": {"alias": "OT_LAN", "policy_zone": "NSS OT-All", "notes": ""}
         }
     }
     result = zone_map.lookup_policy_zone(zone_map_data, "FGT-OT-01", "port99")
@@ -71,8 +72,8 @@ def test_lookup_policy_zone_null_value():
 def test_missing_entries_all_mapped():
     zone_map_data = {
         "FGT-OT-01": {
-            "port3": {"alias": "OT_LAN", "policy_zone": "NETZONE OT-All", "notes": ""},
-            "port4": {"alias": "IT_DMZ", "policy_zone": "NETZONE IT DMZ", "notes": ""},
+            "port3": {"alias": "OT_LAN", "policy_zone": "NSS OT-All", "notes": ""},
+            "port4": {"alias": "IT_DMZ", "policy_zone": "NSS IT DMZ", "notes": ""},
         }
     }
     result = zone_map.missing_entries(zone_map_data, "FGT-OT-01", ["port3", "port4"])
@@ -82,7 +83,7 @@ def test_missing_entries_all_mapped():
 def test_missing_entries_some_missing():
     zone_map_data = {
         "FGT-OT-01": {
-            "port3": {"alias": "OT_LAN", "policy_zone": "NETZONE OT-All", "notes": ""},
+            "port3": {"alias": "OT_LAN", "policy_zone": "NSS OT-All", "notes": ""},
             "port4": {"alias": "IT_TRANSIT", "policy_zone": None, "notes": ""},
         }
     }
