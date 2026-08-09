@@ -11,6 +11,7 @@ ENV PYTHONUNBUFFERED=1
 WORKDIR /opt/4tanalyst
 
 # Install uv and editable packages
+COPY mcp_common/ mcp_common/
 COPY standards_mcp/ standards_mcp/
 COPY fortimanager_mcp/ fortimanager_mcp/
 COPY feedback_mcp/ feedback_mcp/
@@ -29,7 +30,7 @@ COPY scripts/ scripts/
 
 RUN python -m pip install --upgrade pip setuptools wheel
 RUN python -m pip install uv
-RUN python -m pip install -e standards_mcp/ -e fortimanager_mcp/ -e feedback_mcp/ -e intake_mcp/ -e zone_mcp/ \
+RUN python -m pip install -e mcp_common/ -e standards_mcp/ -e fortimanager_mcp/ -e feedback_mcp/ -e intake_mcp/ -e zone_mcp/ \
     -e planner/ -e fwanalyst_server/
 
 EXPOSE 8000
