@@ -4,7 +4,6 @@ All tests set allowed_adoms_var directly — no HTTP stack needed.
 """
 import sys
 from pathlib import Path
-import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -50,8 +49,8 @@ def test_require_adom_stdio_default_full_access():
 
 def test_get_adoms_filters_to_allowed(monkeypatch):
     """get_adoms() returns only ADOMs in the allowed set."""
-    from fortimanager_mcp import server as fmg_server
     from fortimanager_mcp import query as _query
+    from fortimanager_mcp import server as fmg_server
 
     fake_adoms = [
         {"name": "OT-ADOM", "status": "1", "os_type": "fos", "desc": ""},
@@ -77,8 +76,8 @@ def test_get_adoms_filters_to_allowed(monkeypatch):
 
 
 def test_get_adoms_wildcard_returns_all(monkeypatch):
-    from fortimanager_mcp import server as fmg_server
     from fortimanager_mcp import query as _query
+    from fortimanager_mcp import server as fmg_server
 
     fake_adoms = [
         {"name": "OT-ADOM", "status": "1", "os_type": "fos", "desc": ""},

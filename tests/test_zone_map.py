@@ -1,4 +1,3 @@
-import pytest
 from fortimanager_mcp import zone_map
 
 

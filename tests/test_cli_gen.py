@@ -9,9 +9,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from planner.cli_gen import (
     address_object_cli,
-    service_object_cli,
-    policy_cli,
     exception_comment,
+    policy_cli,
+    service_object_cli,
 )
 
 

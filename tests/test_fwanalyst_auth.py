@@ -89,8 +89,9 @@ def test_unified_server_aggregates_all_tools():
 
 
 def test_context_module_exports_allowed_adoms_var():
-    from fwanalyst_server.context import allowed_adoms_var
     from contextvars import ContextVar
+
+    from fwanalyst_server.context import allowed_adoms_var
     assert isinstance(allowed_adoms_var, ContextVar)
 
 

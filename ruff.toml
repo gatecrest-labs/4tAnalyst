@@ -1,3 +1,4 @@
 # Simple, low-noise lint gate: unused imports/vars/undefined names (F) and
 # import-order (I). Not a full style/formatting linter — see CONTRIBUTING.md.
+[lint]
 select = ["F", "I"]

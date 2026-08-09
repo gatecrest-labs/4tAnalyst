@@ -18,9 +18,7 @@ from planner.models import (
     NormalizedFlow,
     ObjectPlan,
     PlannerDataError,
-    TargetFirewall,
 )
-
 
 # ---------------------------------------------------------------------------
 # Models
@@ -60,14 +58,13 @@ def test_planner_data_error_fields():
 # Fetch layer
 # ---------------------------------------------------------------------------
 
+from fortimanager_mcp.client import FortiManagerAPIError
 from planner.fetch import (
-    DeviceSnapshot,
     fetch_device_snapshot,
-    fetch_zone_verdict,
     fetch_zone_domains,
+    fetch_zone_verdict,
     resolve_interfaces,
 )
-from fortimanager_mcp.client import FortiManagerAPIError
 
 
 class FakeFMGClient:
@@ -547,7 +544,6 @@ def test_cli_json_only_end_to_end(monkeypatch, capsys):
 
 
 import json  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Group-append alternative

@@ -14,14 +14,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from fortimanager_mcp.matching import parse_service_request
 from planner.standards import (
     load_naming,
+    log_settings,
     object_name,
     policy_name,
+    review_requirements,
     risk_level,
     rule_type_for,
-    log_settings,
-    review_requirements,
 )
-
 
 # ---------------------------------------------------------------------------
 # Naming
