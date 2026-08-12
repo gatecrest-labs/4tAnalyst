@@ -381,7 +381,7 @@ def test_render_conf_includes_group_append_alternative():
     assert 'append member "H_10.9.8.7"' in conf
     assert "ALSO AFFECTS" in conf and "#30" in conf
     html_out = render_report.render_html(payload)
-    assert "Alternative: Extend Existing Group" in html_out
+    assert "Alternative: Extend Existing Rule" in html_out
     assert "GRP_PUB" in html_out
 
 
