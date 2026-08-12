@@ -139,6 +139,9 @@ def render_conf(data: dict) -> str:
             if alt.get("group_cli"):
                 parts.append(alt["group_cli"].replace("<TICKET_ID>", ticket))
                 parts.append("")
+            elif alt.get("direct_cli"):
+                parts.append(alt["direct_cli"].replace("<TICKET_ID>", ticket))
+                parts.append("")
     return "\n".join(parts)
 
 
@@ -280,25 +283,34 @@ def render_html(data: dict) -> str:
         alt = fw_cli.get("alternative")
         if not alt:
             continue
-        affected_html = "".join(
-            f"<li>package <code>{esc(a.get('package', ''))}</code> policy "
-            f"#{esc(a.get('policy_id', ''))} \"{esc(a.get('name', ''))}\" "
-            f"({esc(a.get('side', ''))} via {esc('/'.join(a.get('via', [])))}, "
-            f"status {esc(a.get('status', ''))})</li>"
-            for a in alt.get("affected_rules", [])
-        ) or "<li>No other rules reference this group.</li>"
         alt_warn_html = "".join(f"<li>{esc(w)}</li>" for w in alt.get("warnings", []))
+        if alt.get("group"):
+            affected_html = "".join(
+                f"<li>package <code>{esc(a.get('package', ''))}</code> policy "
+                f"#{esc(a.get('policy_id', ''))} \"{esc(a.get('name', ''))}\" "
+                f"({esc(a.get('side', ''))} via {esc('/'.join(a.get('via', [])))}, "
+                f"status {esc(a.get('status', ''))})</li>"
+                for a in alt.get("affected_rules", [])
+            ) or "<li>No other rules reference this group.</li>"
+            scope_html = (
+                f"<p><strong>Other rules referencing group "
+                f"<code>{esc(alt.get('group', ''))}</code>:</strong></p>"
+                f"<ul>{affected_html}</ul>"
+            )
+        else:
+            scope_html = (
+                "<p class='note'>Direct address-list change — only this rule is "
+                "affected. No blast radius.</p>"
+            )
         alt_html += (
             f"<div class='rule-card'><strong>{esc(fw_cli.get('firewall', ''))}</strong> "
             f"<span class='tag'>OPTION B</span>"
             f"<div class='note'>{esc(alt.get('summary', ''))}</div>"
-            f"<p><strong>Other rules referencing group "
-            f"<code>{esc(alt.get('group', ''))}</code>:</strong></p>"
-            f"<ul>{affected_html}</ul>"
+            f"{scope_html}"
             f"<ul>{alt_warn_html}</ul></div>"
         )
     alt_block = (
-        "<section><h2>Alternative: Extend Existing Group</h2>"
+        "<section><h2>Alternative: Extend Existing Rule</h2>"
         "<div class='note'>The generated CLI contains both options — "
         "implement ONE, not both.</div>"
         f"{alt_html}</section>"

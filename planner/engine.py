@@ -329,14 +329,22 @@ def _plan_firewall(
     fw.alternative = _group_append_alternative(fw, snapshot, matcher, flow, fmg_client)
     if fw.alternative:
         alt = fw.alternative
-        others = len(alt.affected_policies)
         member_names = ", ".join(m.name for m in alt.members)
-        fw.warnings.append(
-            f"Alternative: rule #{alt.policy_id} {alt.policy_name!r} already covers "
-            f"everything except the {alt.side} — appending {member_names} to "
-            f"group {alt.group!r} would cover this flow without a new policy "
-            f"({others} other rule(s) reference that group). Choose ONE option."
-        )
+        if alt.group:
+            others = len(alt.affected_policies)
+            fw.warnings.append(
+                f"Alternative: rule #{alt.policy_id} {alt.policy_name!r} already covers "
+                f"everything except the {alt.side} — appending {member_names} to "
+                f"group {alt.group!r} would cover this flow without a new policy "
+                f"({others} other rule(s) reference that group). Choose ONE option."
+            )
+        else:
+            fw.warnings.append(
+                f"Alternative: rule #{alt.policy_id} {alt.policy_name!r} already covers "
+                f"everything except the {alt.side} — adding {member_names} directly to "
+                "the rule's source address list would cover this flow without a new policy "
+                "(only this rule is affected). Choose ONE option."
+            )
     return fw
 
 
@@ -382,16 +390,29 @@ def _group_append_alternative(
     flow: NormalizedFlow,
     client,
 ) -> GroupAppendAlternative | None:
-    """Find a near-miss rule where the only gap is group membership on one
-    address side, and propose appending the flow's endpoint to that group.
+    """Find the best near-miss rule where the only gap is one address side,
+    and propose extending it instead of creating a new policy.
 
-    Only offered when it can be reasoned about safely: the rule must be
-    enabled, accept, unconditional, interface-scoped to the flow, with no
-    unknown refs, and the failing side must be non-negated and reference a
-    group. The blast radius (every other policy referencing the group,
-    directly or via nesting) is always enumerated across the whole ADOM.
+    Two extension modes are offered:
+    - Group-append: the failing side references a named address group →
+      append the missing endpoint to that group. Carries full blast radius.
+    - Direct-append: the failing side is a concrete host/subnet list with no
+      group → add the missing endpoint directly to the rule's address list.
+      Only that one rule is affected (no blast radius).
+
+    All qualifying candidates across every package are collected, then ranked
+    by the specificity of the non-failing sides (count of non-"all" address
+    refs). A direct-append candidate receives a +1 tiebreaker because it has
+    a smaller blast radius than an equivalent group-append.
+
+    Rules must be enabled, accept, unconditional, interface-scoped, and have
+    no unknown refs. The failing side must be non-negated and non-empty (an
+    unconstrained "all" source/destination is skipped for direct-append since
+    the rule already matches anything).
     """
     from planner.insertion import _intf_scoped
+
+    candidates: list[tuple[int, GroupAppendAlternative]] = []
 
     for pkg, policies in snapshot.policies_by_package.items():
         for pol in policies:
@@ -409,11 +430,11 @@ def _group_append_alternative(
                 continue
             src_fulls = {s: matcher.addr_side(pol, "srcaddr", s)[1] for s in flow.srcs}
             dst_fulls = {d: matcher.addr_side(pol, "dstaddr", d)[1] for d in flow.dsts}
-            for side, key, missing, other_all_full in (
-                ("destination", "dstaddr",
+            for side, key, other_key, missing, other_all_full in (
+                ("destination", "dstaddr", "srcaddr",
                  [d for d, f in dst_fulls.items() if not f],
                  all(src_fulls.values())),
-                ("source", "srcaddr",
+                ("source", "srcaddr", "dstaddr",
                  [s for s, f in src_fulls.items() if not f],
                  all(dst_fulls.values())),
             ):
@@ -421,41 +442,75 @@ def _group_append_alternative(
                     continue
                 if pol.get(f"{key}-negate", "disable") in ("enable", 1, True):
                     continue  # appending to a negated side REMOVES access
+
+                # Specificity: how many non-"all" refs the non-failing side has.
+                # A rule with an exact destination host scores higher than one
+                # with destination "all", so we prefer the narrower match.
+                other_refs = list(_ref_names(pol.get(other_key, [])))
+                specificity = sum(1 for ref in other_refs if ref.lower() != "all")
+
                 group = next(
                     (n for n in _ref_names(pol.get(key, []))
                      if snapshot.addr_catalog.is_group(n)), None,
                 )
-                if group is None:
-                    continue
                 members = [_address_object_plan(side, t, snapshot) for t in missing]
-                affected, scan_warnings = _group_blast_radius(
-                    client, snapshot, group,
-                    exclude=(pkg, pol.get("policyid", 0)),
-                )
-                warnings = list(scan_warnings)
-                if affected:
-                    warnings.append(
-                        f"Appending to group {group!r} also changes "
-                        f"{len(affected)} other rule(s) — review each before "
-                        "choosing this option."
+
+                if group is not None:
+                    affected, scan_warnings = _group_blast_radius(
+                        client, snapshot, group,
+                        exclude=(pkg, pol.get("policyid", 0)),
                     )
+                    warnings = list(scan_warnings)
+                    if affected:
+                        warnings.append(
+                            f"Appending to group {group!r} also changes "
+                            f"{len(affected)} other rule(s) — review each before "
+                            "choosing this option."
+                        )
+                    else:
+                        warnings.append(
+                            f"No other rule references group {group!r} — the append "
+                            "affects only the rule above."
+                        )
+                    candidates.append((specificity, GroupAppendAlternative(
+                        package=pkg,
+                        policy_id=pol.get("policyid", 0),
+                        policy_name=pol.get("name", ""),
+                        side=side,
+                        group=group,
+                        members=members,
+                        group_cli=cli_gen.addrgrp_append_cli(
+                            group, [m.name for m in members]),
+                        affected_policies=affected,
+                        warnings=warnings,
+                    )))
                 else:
-                    warnings.append(
-                        f"No other rule references group {group!r} — the append "
-                        "affects only the rule above."
-                    )
-                return GroupAppendAlternative(
-                    package=pkg,
-                    policy_id=pol.get("policyid", 0),
-                    policy_name=pol.get("name", ""),
-                    side=side,
-                    group=group,
-                    members=members,
-                    group_cli=cli_gen.addrgrp_append_cli(group, [m.name for m in members]),
-                    affected_policies=affected,
-                    warnings=warnings,
-                )
-    return None
+                    # Direct-append: the failing side has concrete refs, no group.
+                    # Skip if unconstrained ("all") — the rule would already match.
+                    failing_refs = list(_ref_names(pol.get(key, [])))
+                    if not failing_refs or failing_refs == ["all"]:
+                        continue
+                    member_names = [m.name for m in members]
+                    # +1 tiebreaker: no blast radius beats an equal-specificity group
+                    candidates.append((specificity + 1, GroupAppendAlternative(
+                        package=pkg,
+                        policy_id=pol.get("policyid", 0),
+                        policy_name=pol.get("name", ""),
+                        side=side,
+                        group=None,
+                        members=members,
+                        direct_cli=cli_gen.policy_addr_append_cli(
+                            pol.get("policyid", 0), key, member_names),
+                        warnings=[
+                            f"Adding {', '.join(member_names)} directly to rule "
+                            f"#{pol.get('policyid', 0)} {side} address list — "
+                            "only this rule is affected."
+                        ],
+                    )))
+
+    if not candidates:
+        return None
+    return max(candidates, key=lambda c: c[0])[1]
 
 
 def _group_blast_radius(
@@ -808,13 +863,22 @@ def to_report_payload(plan: ChangePlan) -> dict:
         if fw.alternative:
             alt = fw.alternative
             member_names = ", ".join(m.name for m in alt.members)
-            entry["alternative"] = {
-                "summary": (
+            if alt.group:
+                summary = (
                     f"Extend existing rule #{alt.policy_id} {alt.policy_name!r} "
                     f"(package {alt.package!r}) by appending {member_names} "
                     f"to its {alt.side} group {alt.group!r} instead of creating "
                     "a new policy. Choose ONE option, not both."
-                ),
+                )
+            else:
+                summary = (
+                    f"Extend existing rule #{alt.policy_id} {alt.policy_name!r} "
+                    f"(package {alt.package!r}) by adding {member_names} directly "
+                    f"to its {alt.side} address list instead of creating "
+                    "a new policy. Choose ONE option, not both."
+                )
+            entry["alternative"] = {
+                "summary": summary,
                 "package": alt.package,
                 "policy_id": alt.policy_id,
                 "policy_name": alt.policy_name,
@@ -823,6 +887,7 @@ def to_report_payload(plan: ChangePlan) -> dict:
                 "member_names": [m.name for m in alt.members],
                 "member_cli": "\n\n".join(m.cli for m in alt.members if m.cli),
                 "group_cli": alt.group_cli,
+                "direct_cli": alt.direct_cli,
                 "affected_rules": alt.affected_policies,
                 "warnings": alt.warnings,
             }

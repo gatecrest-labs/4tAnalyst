@@ -75,17 +75,29 @@ class InsertionPlan:
 
 @dataclass
 class GroupAppendAlternative:
-    """Optional smaller change: append the flow's missing endpoint to an
-    address group already referenced by a near-miss rule, instead of
-    creating a new policy. Always carries the blast radius — every other
-    policy that references the group (directly or via group nesting)."""
+    """Optional smaller change: extend a near-miss rule instead of creating
+    a new policy.
+
+    Two modes:
+    - Group-append (group is not None): append the missing endpoint to an
+      address group already referenced by the rule. group_cli carries the
+      FortiGate CLI. Always carries the full blast radius (every other policy
+      referencing the group directly or via group nesting).
+    - Direct-append (group is None): add the missing endpoint directly to
+      the rule's srcaddr/dstaddr list. direct_cli carries the CLI. Blast
+      radius is trivially zero — only this rule is affected.
+
+    The planner picks the best candidate by specificity: a rule that exactly
+    matches on the non-failing sides (e.g. exact destination host + exact
+    service) is preferred over a broad catch-all that merely qualifies."""
     package: str
     policy_id: int
     policy_name: str
     side: str                              # "source" | "destination"
-    group: str
+    group: str | None                      # None for direct-append
     members: list[ObjectPlan]
-    group_cli: str
+    group_cli: str = ""                    # set for group-append; empty for direct
+    direct_cli: str = ""                   # set for direct-append; empty for group
     affected_policies: list[dict] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 

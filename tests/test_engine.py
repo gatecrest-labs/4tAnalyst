@@ -659,10 +659,90 @@ def test_group_append_not_offered_for_negated_side():
     assert plan.firewalls[0].alternative is None
 
 
-def test_group_append_not_offered_when_no_group_on_failing_side():
-    pols = [dict(_NEAR_MISS_POLICIES[0], dstaddr=["H_EXIST"])]  # plain object, no group
+def test_direct_append_offered_when_no_group_on_failing_side():
+    # Direct-object dst (no group) — should now propose a direct policy append
+    # instead of silently skipping.  H_EXIST resolves to 10.1.2.3/32 which does
+    # not contain the requested dst 10.9.8.7 → dst is the failing side.
+    pols = [dict(_NEAR_MISS_POLICIES[0], dstaddr=["H_EXIST"])]
     plan = _run(service="tcp/8443", fmg=EngineFMG(policies=pols))
-    assert plan.firewalls[0].alternative is None
+    alt = plan.firewalls[0].alternative
+    assert alt is not None
+    assert alt.group is None                   # direct-append, not group-append
+    assert alt.side == "destination"
+    assert alt.policy_id == 20
+    assert "append dstaddr" in alt.direct_cli
+    assert alt.group_cli == ""                 # no group CLI for direct-append
+    assert not alt.affected_policies           # only one rule affected
+
+
+def _seeburger_fmg():
+    """Fake FMG mimicking the SEEBURGER / RITM0892999 scenario:
+    a specific near-miss rule (exact dst + svc, direct host src) alongside a
+    broad catch-all rule (group src, dst=all).  The specific rule must win.
+
+    GRP_BROAD contains H_SOMEOTHER (10.99.0.5/32) — NOT the request src
+    10.1.2.3 — so the catch-all does not fully cover the flow and both rules
+    become near-miss candidates that the ranker must choose between."""
+    pols = [
+        # Specific near-miss: H_OLD_SRC ≠ 10.1.2.3, but dst and svc are exact
+        {"policyid": 110221, "name": "SEEBURGER - ESB Support", "status": "enable",
+         "action": 1, "schedule": ["always"],
+         "srcaddr": ["H_OLD_SRC"], "dstaddr": ["H_EXACT_DST"],
+         "service": ["SVC_TCP_8443"], "srcintf": ["port1"], "dstintf": ["port2"],
+         "logtraffic": 2},
+        # Catch-all: group src (doesn't contain request src), any dst — qualifies
+        # but is less specific (dst=all → specificity 0)
+        {"policyid": 110154, "name": "T3 - CatchAll", "status": "enable",
+         "action": 1, "schedule": ["always"],
+         "srcaddr": ["GRP_BROAD"], "dstaddr": ["all"],
+         "service": ["SVC_TCP_8443"], "srcintf": ["port1"], "dstintf": ["port2"],
+         "logtraffic": 2},
+    ]
+    groups = [{"name": "GRP_BROAD", "member": ["H_SOMEOTHER"]}]
+    fmg = EngineFMG(policies=pols, addr_groups=groups)
+    base = fmg.get_address_objects("root")
+    fmg.get_address_objects = lambda adom: base + [
+        # H_OLD_SRC: prior host on same subnet, not 10.1.2.3 (the new request src)
+        {"name": "H_OLD_SRC", "type": "ipmask", "subnet": "10.1.2.99/32"},
+        # H_EXACT_DST: exact requested destination
+        {"name": "H_EXACT_DST", "type": "ipmask", "subnet": "10.9.8.7/32"},
+        # H_SOMEOTHER: occupant of GRP_BROAD — must not be the request src
+        {"name": "H_SOMEOTHER", "type": "ipmask", "subnet": "10.99.0.5/32"},
+    ]
+    return fmg
+
+
+def test_direct_append_preferred_over_group_catch_all():
+    # The specific rule (exact dst + svc, direct src) should be chosen over the
+    # catch-all group-append rule.  This is the SEEBURGER/RITM0892999 scenario.
+    plan = _run(service="tcp/8443", fmg=_seeburger_fmg())
+    fw = plan.firewalls[0]
+    alt = fw.alternative
+    assert alt is not None
+    # must point to the specific rule, not the catch-all
+    assert alt.policy_id == 110221
+    assert alt.policy_name == "SEEBURGER - ESB Support"
+    assert alt.group is None                   # direct-append
+    assert alt.side == "source"
+    assert "append srcaddr" in alt.direct_cli
+    assert "110221" in alt.direct_cli
+    assert not alt.affected_policies
+
+
+def test_direct_append_alternative_in_payload():
+    plan = _run(service="tcp/8443", fmg=_seeburger_fmg())
+    payload = to_report_payload(plan)
+    validate_payload(payload)
+    entry = payload["cli"]["per_firewall"][0]
+    alt = entry["alternative"]
+    assert alt["policy_id"] == 110221
+    assert alt["group"] is None
+    assert alt["direct_cli"]
+    assert "append srcaddr" in alt["direct_cli"]
+    assert alt["group_cli"] == ""
+    assert "direct_cli" in alt              # field must be serialised
+    assert "adding" in alt["summary"].lower()
+    assert "source address list" in alt["summary"]
 
 
 # ---------------------------------------------------------------------------

@@ -106,6 +106,20 @@ def addrgrp_append_cli(group: str, member: str | list[str]) -> str:
     )
 
 
+def policy_addr_append_cli(policy_id: int, key: str, members: list[str]) -> str:
+    """CLI to append address object(s) directly to a policy's srcaddr or
+    dstaddr list.  `append` preserves the existing entries (unlike `set`).
+    `key` must be "srcaddr" or "dstaddr"."""
+    appends = "\n".join(f'        append {key} "{m}"' for m in members)
+    return (
+        'config firewall policy\n'
+        f'    edit {policy_id}\n'
+        f'{appends}\n'
+        '    next\n'
+        'end'
+    )
+
+
 def addrgrp_create_cli(name: str, members: list[str]) -> str:
     """CLI to create a new address group with the given members."""
     quoted = " ".join(f'"{m}"' for m in members)
