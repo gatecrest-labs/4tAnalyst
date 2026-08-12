@@ -745,6 +745,54 @@ def test_direct_append_alternative_in_payload():
     assert "source address list" in alt["summary"]
 
 
+def _wind_farms_fmg():
+    """Two near-miss candidates where Wind Farms has more dst refs than SEEBURGER.
+    SEEBURGER (1 exact dst ref) must beat Wind Farms (4 dst refs) because fewer
+    non-failing-side refs means the rule is more targeted at this specific flow."""
+    pols = [
+        {"policyid": 110221, "name": "SEEBURGER - ESB Support", "status": "enable",
+         "action": 1, "schedule": ["always"],
+         "srcaddr": ["H_OLD_SRC"], "dstaddr": ["H_EXACT_DST"],
+         "service": ["SVC_TCP_8443"], "srcintf": ["port1"], "dstintf": ["port2"],
+         "logtraffic": 2},
+        {"policyid": 10110, "name": "Wind Farms", "status": "enable",
+         "action": 1, "schedule": ["always"],
+         "srcaddr": ["H_WF1", "H_WF2", "H_WF3"],
+         "dstaddr": ["H_EXACT_DST", "H_OTHER1", "H_OTHER2", "H_OTHER3"],
+         "service": ["SVC_TCP_8443"], "srcintf": ["port1"], "dstintf": ["port2"],
+         "logtraffic": 2},
+    ]
+    fmg = EngineFMG(policies=pols)
+    base = fmg.get_address_objects("root")
+    fmg.get_address_objects = lambda adom: base + [
+        {"name": "H_OLD_SRC",   "type": "ipmask", "subnet": "10.1.2.99/32"},
+        {"name": "H_EXACT_DST", "type": "ipmask", "subnet": "10.9.8.7/32"},
+        {"name": "H_WF1",       "type": "ipmask", "subnet": "10.50.0.1/32"},
+        {"name": "H_WF2",       "type": "ipmask", "subnet": "10.50.0.2/32"},
+        {"name": "H_WF3",       "type": "ipmask", "subnet": "10.50.0.3/32"},
+        {"name": "H_OTHER1",    "type": "ipmask", "subnet": "10.60.0.1/32"},
+        {"name": "H_OTHER2",    "type": "ipmask", "subnet": "10.60.0.2/32"},
+        {"name": "H_OTHER3",    "type": "ipmask", "subnet": "10.60.0.3/32"},
+    ]
+    return fmg
+
+
+def test_targeted_rule_preferred_over_broad_many_refs():
+    # SEEBURGER has exactly 1 dst ref matching our flow; Wind Farms has 4 dst refs
+    # (ours + 3 others).  The rule with fewer non-failing-side refs must win —
+    # more refs means the rule covers many unrelated flows, not this one specifically.
+    plan = _run(service="tcp/8443", fmg=_wind_farms_fmg())
+    fw = plan.firewalls[0]
+    alt = fw.alternative
+    assert alt is not None, "expected a near-miss alternative"
+    assert alt.policy_id == 110221, (
+        f"expected SEEBURGER (110221), got rule #{alt.policy_id} '{alt.policy_name}'"
+    )
+    assert alt.policy_name == "SEEBURGER - ESB Support"
+    assert alt.group is None    # direct-append, no group
+    assert alt.side == "source"
+
+
 # ---------------------------------------------------------------------------
 # Consolidated multi-value planning
 # ---------------------------------------------------------------------------
