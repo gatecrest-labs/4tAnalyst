@@ -239,14 +239,30 @@ def _plan_firewall(
                 fw.covering_rules.append(summary)
             else:
                 # Skip disabled rules — they have no effect on traffic.
-                # Skip rules where the service dimension has no overlap with
-                # the requested service and no unknown service refs; those are
-                # noise (e.g. an ICMP rule when tcp/22 was requested).
                 if any_r.disabled:
                     continue
+                # Skip if the service dimension has no overlap (e.g. an ICMP
+                # rule when tcp/22 was requested — pure noise).
                 svc_m, _ = matcher.svc_side(pol, flow.service_ranges)
                 if not svc_m:
                     continue
+                # Skip rules where the destination matched only via FQDN /
+                # unresolvable refs with no actual IP-range overlap. These are
+                # application-specific policies (e.g. Avaya Cloud FQDNs) that
+                # have no real relationship to the requested destination IP.
+                if not pol.get("dstaddr-negate", "disable") in ("enable", 1, True):
+                    if not any(matcher.addr_ip_overlap(pol, "dstaddr", d) for d in flow.dsts):
+                        continue
+                # Annotate which requested services aren't covered — engineers
+                # can see at a glance what the gap is without reading the policy.
+                svc_gap = matcher.uncovered_services(pol, flow.service_ranges)
+                if svc_gap:
+                    summary["svc_gap"] = [
+                        f"{pr.protocol}/{pr.start}"
+                        if pr.start == pr.end
+                        else f"{pr.protocol}/{pr.start}-{pr.end}"
+                        for pr in svc_gap
+                    ]
                 fw.partial_matches.append(summary)
 
     uncovered = [p for p in pairs if not pair_covered[p]]
@@ -329,6 +345,26 @@ def _plan_firewall(
     fw.alternative = _group_append_alternative(fw, snapshot, matcher, flow, fmg_client)
     if fw.alternative:
         alt = fw.alternative
+        # Inject the near-miss rule into partial_matches so the rule table
+        # and the CLI section (Option B) tell the same story.
+        for _pkg, _pols in snapshot.policies_by_package.items():
+            if _pkg != alt.package:
+                continue
+            for _pol in _pols:
+                if _pol.get("policyid") == alt.policy_id:
+                    _nm = _summarise_policy(_pol, _pkg)
+                    _nm["full_cover"] = False
+                    _nm["match_reason"] = (
+                        f"{alt.side.capitalize()} missing — "
+                        + ", ".join(m.name for m in alt.members)
+                        + (" not yet in group " + alt.group if alt.group
+                           else " not yet in address list")
+                    )
+                    fw.partial_matches.append(_nm)
+                    break
+            else:
+                continue
+            break
         member_names = ", ".join(m.name for m in alt.members)
         if alt.group:
             others = len(alt.affected_policies)
@@ -412,7 +448,13 @@ def _group_append_alternative(
     """
     from planner.insertion import _intf_scoped
 
-    candidates: list[tuple[int, GroupAppendAlternative]] = []
+    # Score tuple: (has_specific, -non_all_count, direct_tiebreaker)
+    # has_specific=1 beats "all" rules (has_specific=0).
+    # Among specific rules, FEWER non-failing side refs is better — a rule
+    # with exactly the destination we need (1 ref) is more targeted than one
+    # that matches our destination among 10 others (e.g. Wind Farms).
+    # direct_tiebreaker=1 breaks ties in favour of direct-append (no blast radius).
+    candidates: list[tuple[tuple[int, int, int], GroupAppendAlternative]] = []
 
     for pkg, policies in snapshot.policies_by_package.items():
         for pol in policies:
@@ -443,11 +485,9 @@ def _group_append_alternative(
                 if pol.get(f"{key}-negate", "disable") in ("enable", 1, True):
                     continue  # appending to a negated side REMOVES access
 
-                # Specificity: how many non-"all" refs the non-failing side has.
-                # A rule with an exact destination host scores higher than one
-                # with destination "all", so we prefer the narrower match.
                 other_refs = list(_ref_names(pol.get(other_key, [])))
-                specificity = sum(1 for ref in other_refs if ref.lower() != "all")
+                non_all_count = sum(1 for ref in other_refs if ref.lower() != "all")
+                has_specific = 1 if non_all_count > 0 else 0
 
                 group = next(
                     (n for n in _ref_names(pol.get(key, []))
@@ -456,23 +496,8 @@ def _group_append_alternative(
                 members = [_address_object_plan(side, t, snapshot) for t in missing]
 
                 if group is not None:
-                    affected, scan_warnings = _group_blast_radius(
-                        client, snapshot, group,
-                        exclude=(pkg, pol.get("policyid", 0)),
-                    )
-                    warnings = list(scan_warnings)
-                    if affected:
-                        warnings.append(
-                            f"Appending to group {group!r} also changes "
-                            f"{len(affected)} other rule(s) — review each before "
-                            "choosing this option."
-                        )
-                    else:
-                        warnings.append(
-                            f"No other rule references group {group!r} — the append "
-                            "affects only the rule above."
-                        )
-                    candidates.append((specificity, GroupAppendAlternative(
+                    score: tuple[int, int, int] = (has_specific, -non_all_count, 0)
+                    candidates.append((score, GroupAppendAlternative(
                         package=pkg,
                         policy_id=pol.get("policyid", 0),
                         policy_name=pol.get("name", ""),
@@ -481,8 +506,6 @@ def _group_append_alternative(
                         members=members,
                         group_cli=cli_gen.addrgrp_append_cli(
                             group, [m.name for m in members]),
-                        affected_policies=affected,
-                        warnings=warnings,
                     )))
                 else:
                     # Direct-append: the failing side has concrete refs, no group.
@@ -491,8 +514,8 @@ def _group_append_alternative(
                     if not failing_refs or failing_refs == ["all"]:
                         continue
                     member_names = [m.name for m in members]
-                    # +1 tiebreaker: no blast radius beats an equal-specificity group
-                    candidates.append((specificity + 1, GroupAppendAlternative(
+                    score = (has_specific, -non_all_count, 1)
+                    candidates.append((score, GroupAppendAlternative(
                         package=pkg,
                         policy_id=pol.get("policyid", 0),
                         policy_name=pol.get("name", ""),
@@ -510,7 +533,32 @@ def _group_append_alternative(
 
     if not candidates:
         return None
-    return max(candidates, key=lambda c: c[0])[1]
+
+    winner = max(candidates, key=lambda c: c[0])[1]
+
+    # Compute blast radius once, only for the winning group-append candidate.
+    # Moving this outside the loop avoids N FortiManager round-trips (one per
+    # qualifying candidate) — only the winner's group is ever scanned.
+    if winner.group is not None:
+        affected, scan_warnings = _group_blast_radius(
+            client, snapshot, winner.group,
+            exclude=(winner.package, winner.policy_id),
+        )
+        winner.affected_policies = affected
+        winner.warnings = list(scan_warnings)
+        if affected:
+            winner.warnings.append(
+                f"Appending to group {winner.group!r} also changes "
+                f"{len(affected)} other rule(s) — review each before "
+                "choosing this option."
+            )
+        else:
+            winner.warnings.append(
+                f"No other rule references group {winner.group!r} — the append "
+                "affects only the rule above."
+            )
+
+    return winner
 
 
 def _group_blast_radius(

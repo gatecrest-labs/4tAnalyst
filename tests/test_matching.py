@@ -442,3 +442,78 @@ def test_matcher_public_side_helpers():
     assert src_m and src_f
     svc_m, svc_f = m.svc_side(pol, _https())
     assert svc_m and svc_f
+
+
+# ---------------------------------------------------------------------------
+# addr_ip_overlap
+# ---------------------------------------------------------------------------
+
+def test_addr_ip_overlap_returns_true_when_ip_in_resolved_subnet():
+    m = _matcher()
+    pol = _pol()  # srcaddr=["NET_10_1"] which is 10.1.0.0/16
+    assert m.addr_ip_overlap(pol, "srcaddr", "10.1.2.3")
+
+
+def test_addr_ip_overlap_returns_false_when_ip_outside_resolved_subnet():
+    m = _matcher()
+    pol = _pol()  # srcaddr=["NET_10_1"] which is 10.1.0.0/16
+    assert not m.addr_ip_overlap(pol, "srcaddr", "10.2.0.1")
+
+
+def test_addr_ip_overlap_ignores_fqdn_refs():
+    """A policy whose only dst refs are FQDNs (unresolvable) must return False,
+    even though the conservative matcher would say matched=True."""
+    addr = AddressCatalog(
+        [{"name": "H_192_168_1_1", "type": "ipmask", "subnet": "192.168.1.1/32"}],
+        [],
+    )
+    svc = ServiceCatalog([], [])
+    m = PolicyMatcher(addr, svc)
+    # FQDN_AVAYA resolves to None (unknown/FQDN type not in catalog)
+    pol = _pol(dstaddr=["FQDN_AVAYA"])
+    assert not m.addr_ip_overlap(pol, "dstaddr", "52.116.196.54")
+
+
+def test_addr_ip_overlap_true_when_any_ref_overlaps_even_if_others_are_fqdn():
+    """If at least one ref resolves and overlaps, return True despite other FQDNs."""
+    addr = AddressCatalog(
+        [{"name": "H_52", "type": "ipmask", "subnet": "52.116.196.0/24"}],
+        [],
+    )
+    m = PolicyMatcher(addr, ServiceCatalog([], []))
+    pol = _pol(dstaddr=["FQDN_UNKNOWN", "H_52"])
+    assert m.addr_ip_overlap(pol, "dstaddr", "52.116.196.54")
+
+
+# ---------------------------------------------------------------------------
+# uncovered_services
+# ---------------------------------------------------------------------------
+
+def test_uncovered_services_empty_when_all_covered():
+    m = _matcher()
+    pol = _pol()  # service=["HTTPS"] which is tcp/443
+    assert m.uncovered_services(pol, parse_service_request("443")) == []
+
+
+def test_uncovered_services_returns_missing_proto():
+    """UDP side of a tcp/udp request not covered by a TCP-only service object."""
+    m = _matcher()
+    pol = _pol()  # service=["HTTPS"] — TCP/443 only
+    requested = parse_service_request("tcp/443") + parse_service_request("udp/443")
+    gap = m.uncovered_services(pol, requested)
+    assert len(gap) == 1
+    assert gap[0].protocol == "udp" and gap[0].start == 443
+
+
+def test_uncovered_services_empty_for_broad_range():
+    """A service object covering tcp/20000-59999 fully contains tcp/33001."""
+    addr = AddressCatalog([], [])
+    svc = ServiceCatalog(
+        [{"name": "BIG", "protocol": "TCP/UDP/SCTP",
+          "tcp-portrange": "20000-59999", "udp-portrange": "20000-59999"}],
+        [],
+    )
+    m = PolicyMatcher(addr, svc)
+    pol = {"service": ["BIG"]}
+    requested = parse_service_request("tcp/33001") + parse_service_request("udp/33001")
+    assert m.uncovered_services(pol, requested) == []

@@ -198,6 +198,17 @@ def render_html(data: dict) -> str:
             f"<span class='note'>(coverage uncertain)</span></td></tr>"
             if unknown_refs else ""
         )
+        svc_gap = r.get('svc_gap', [])
+        gap_row = (
+            f"<tr><th>Service gap</th><td><code>{esc(', '.join(svc_gap))}</code> "
+            f"<span class='note'>— not covered by this rule</span></td></tr>"
+            if svc_gap else ""
+        )
+        match_reason = r.get('match_reason', '')
+        reason_row = (
+            f"<tr><th>Near miss</th><td>{esc(match_reason)}</td></tr>"
+            if match_reason else ""
+        )
         return (
             f"<table class='rule-detail'>"
             f"<tr><th>Policy</th><td><strong>#{esc(r.get('policy_id', ''))}</strong> "
@@ -207,7 +218,7 @@ def render_html(data: dict) -> str:
             f"<tr><th>Source</th><td>{src_td}</td></tr>"
             f"<tr><th>Destination</th><td>{dst_td}</td></tr>"
             f"<tr><th>Service</th><td>{svc_td}</td></tr>"
-            f"{pairs_row}{unknown_row}"
+            f"{pairs_row}{unknown_row}{gap_row}{reason_row}"
             f"</table>"
         )
 
@@ -231,15 +242,22 @@ def render_html(data: dict) -> str:
 
         partial_html = ""
         if partial:
-            partial_cards = "".join(
-                f"<div class='rule-card'>"
-                f"<span class='tag tag-partial'>Partial match</span>"
-                f"{_rule_detail_table(r)}"
-                f"<div class='note'>This rule overlaps the request but does not fully cover it — "
-                f"it is not sufficient on its own.</div>"
-                f"</div>"
-                for r in partial
-            )
+            def _partial_card(r):
+                if r.get('match_reason'):
+                    tag = "Near miss"
+                    note = esc(r['match_reason'])
+                else:
+                    tag = "Partial match"
+                    note = ("This rule overlaps the request but does not fully "
+                            "cover it — it is not sufficient on its own.")
+                return (
+                    f"<div class='rule-card'>"
+                    f"<span class='tag tag-partial'>{esc(tag)}</span>"
+                    f"{_rule_detail_table(r)}"
+                    f"<div class='note'>{note}</div>"
+                    f"</div>"
+                )
+            partial_cards = "".join(_partial_card(r) for r in partial)
             partial_html = (
                 f"<div class='partial-section'>"
                 f"<div class='partial-label'>Partial / overlapping matches</div>"
@@ -490,9 +508,11 @@ def main(argv: list[str] | None = None) -> int:
 
     html_path = outdir / "report.html"
     conf_path = outdir / "implementation.conf"
+    data_path = outdir / "payload.json"
 
     html_path.write_text(render_html(data), encoding="utf-8")
     conf_path.write_text(render_conf(data), encoding="utf-8")
+    data_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     print(str(html_path))
     print(str(conf_path))

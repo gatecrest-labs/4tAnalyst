@@ -189,6 +189,7 @@ def test_main_writes_both_files_under_ticket_id_folder(tmp_path):
     assert rc == 0
     assert (outdir / "CHG0012345" / "report.html").exists()
     assert (outdir / "CHG0012345" / "implementation.conf").exists()
+    assert (outdir / "CHG0012345" / "payload.json").exists()
 
 
 def test_main_writes_both_files_under_timestamp_folder_when_no_ticket(tmp_path):
@@ -350,6 +351,71 @@ def test_render_html_partial_matches_shown_separately():
     # There must be a visual separator / label for partial matches
     assert "Partial / overlapping matches" in html_out
     assert "ICMP testing" in html_out  # the specific partial rule must appear
+
+
+def test_render_html_partial_match_svc_gap_shown():
+    """svc_gap list must appear in the rule detail table for partial matches."""
+    payload = _minimal_payload(
+        existing_rules={
+            "FW1": {
+                "status": "NEW RULE",
+                "covering_rules": [],
+                "partial_matches": [
+                    {
+                        "policy_id": 200,
+                        "name": "Camera feed",
+                        "package": "pkg",
+                        "status": "enable",
+                        "source": ["all"],
+                        "destination": ["corp-internal-nets"],
+                        "service": ["UDP-1024-65535"],
+                        "full_cover": False,
+                        "svc_gap": ["tcp/33001"],
+                    }
+                ],
+                "note": "No covering rule.",
+            }
+        },
+        cli={"status": "new_rule", "per_firewall": []},
+    )
+    html = render_report.render_html(payload)
+    assert "Service gap" in html
+    assert "tcp/33001" in html
+    assert "not covered by this rule" in html
+
+
+def test_render_html_near_miss_match_reason_shown():
+    """match_reason must appear as the card note with 'Near miss' tag."""
+    payload = _minimal_payload(
+        existing_rules={
+            "FW1": {
+                "status": "NEW RULE",
+                "covering_rules": [],
+                "partial_matches": [
+                    {
+                        "policy_id": 110221,
+                        "name": "SEEBURGER - ESB Support",
+                        "package": "pkg",
+                        "status": "enable",
+                        "source": ["GRP_SEEBURGER_SRC"],
+                        "destination": ["h-52.116.196.54"],
+                        "service": ["TCP-33001", "UDP-33001"],
+                        "full_cover": False,
+                        "match_reason": "Source missing — H_10.152.15.25 not yet in address list",
+                    }
+                ],
+                "note": "No covering rule.",
+            }
+        },
+        cli={"status": "new_rule", "per_firewall": []},
+    )
+    html = render_report.render_html(payload)
+    assert "Near miss" in html
+    assert "Source missing" in html
+    assert "H_10.152.15.25" in html
+    assert "Near miss" in html
+    # Generic overlap note must NOT appear for near-miss cards
+    assert "does not fully cover it" not in html
 
 
 def test_render_conf_includes_group_append_alternative():

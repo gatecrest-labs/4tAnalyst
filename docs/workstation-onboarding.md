@@ -11,7 +11,7 @@ A sparse checkout pulls down only the slash commands and the local report-render
 ```bash
 git clone --filter=blob:none --sparse <repo-url> 4tAnalyst-workstation
 cd 4tAnalyst-workstation
-git sparse-checkout set .claude scripts .mcp.json.example
+git sparse-checkout set --no-cone .claude/ scripts/ .mcp.json.example
 ```
 
 Your team access to this repo is **read-only**. If you spot a bug in a skill or a naming rule it enforces, report it to the FW engineering team (see `CONTRIBUTING.md`) rather than editing your local copy.

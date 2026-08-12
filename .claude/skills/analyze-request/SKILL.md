@@ -83,16 +83,25 @@ tables/headers, but never alter values):
 8. **Recommendation** — quote the planner's recommendation text.
 
 ### Step 4 — Generate artifacts
-Write the payload to a temp JSON file (scratch directory) and run:
+Determine the output subdirectory name: use the ticket_id from the payload if
+present, otherwise use today's date+time in `YYYY-MM-DD_HHMM` format (match
+what `render_report.output_dir_name()` would produce).
+
+Write the payload JSON to `output/<subdir>/payload.json` first (not a temp
+file — this preserves the raw planner data for inspection alongside the
+report). Then run:
 
 ```
-uv run python scripts/render_report.py --data <temp-json-path> --outdir output/
+uv run python scripts/render_report.py --data output/<subdir>/payload.json --outdir output/
 ```
 
 It prints the `report.html` and `implementation.conf` paths on success.
 Tell the engineer:
 > Report and CLI config saved to `output/<ticket-or-timestamp>/` — attach
 > both to the change ticket.
+
+`render_report.py` will overwrite `payload.json` with a re-saved copy (same
+data), so the final directory always contains all three files.
 
 (fgplanner also ships its own standalone CLI, but it ships no default
 FortiManager/zone-policy clients and reads no credentials file by design —
