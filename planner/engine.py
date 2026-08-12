@@ -239,14 +239,30 @@ def _plan_firewall(
                 fw.covering_rules.append(summary)
             else:
                 # Skip disabled rules — they have no effect on traffic.
-                # Skip rules where the service dimension has no overlap with
-                # the requested service and no unknown service refs; those are
-                # noise (e.g. an ICMP rule when tcp/22 was requested).
                 if any_r.disabled:
                     continue
+                # Skip if the service dimension has no overlap (e.g. an ICMP
+                # rule when tcp/22 was requested — pure noise).
                 svc_m, _ = matcher.svc_side(pol, flow.service_ranges)
                 if not svc_m:
                     continue
+                # Skip rules where the destination matched only via FQDN /
+                # unresolvable refs with no actual IP-range overlap. These are
+                # application-specific policies (e.g. Avaya Cloud FQDNs) that
+                # have no real relationship to the requested destination IP.
+                if not pol.get("dstaddr-negate", "disable") in ("enable", 1, True):
+                    if not any(matcher.addr_ip_overlap(pol, "dstaddr", d) for d in flow.dsts):
+                        continue
+                # Annotate which requested services aren't covered — engineers
+                # can see at a glance what the gap is without reading the policy.
+                svc_gap = matcher.uncovered_services(pol, flow.service_ranges)
+                if svc_gap:
+                    summary["svc_gap"] = [
+                        f"{pr.protocol}/{pr.start}"
+                        if pr.start == pr.end
+                        else f"{pr.protocol}/{pr.start}-{pr.end}"
+                        for pr in svc_gap
+                    ]
                 fw.partial_matches.append(summary)
 
     uncovered = [p for p in pairs if not pair_covered[p]]
@@ -329,6 +345,26 @@ def _plan_firewall(
     fw.alternative = _group_append_alternative(fw, snapshot, matcher, flow, fmg_client)
     if fw.alternative:
         alt = fw.alternative
+        # Inject the near-miss rule into partial_matches so the rule table
+        # and the CLI section (Option B) tell the same story.
+        for _pkg, _pols in snapshot.policies_by_package.items():
+            if _pkg != alt.package:
+                continue
+            for _pol in _pols:
+                if _pol.get("policyid") == alt.policy_id:
+                    _nm = _summarise_policy(_pol, _pkg)
+                    _nm["full_cover"] = False
+                    _nm["match_reason"] = (
+                        f"{alt.side.capitalize()} missing — "
+                        + ", ".join(m.name for m in alt.members)
+                        + (" not yet in group " + alt.group if alt.group
+                           else " not yet in address list")
+                    )
+                    fw.partial_matches.append(_nm)
+                    break
+            else:
+                continue
+            break
         member_names = ", ".join(m.name for m in alt.members)
         if alt.group:
             others = len(alt.affected_policies)

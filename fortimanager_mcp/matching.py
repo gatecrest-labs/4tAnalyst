@@ -430,6 +430,34 @@ class PolicyMatcher:
         """Public (matched, full_cover) for the service dimension."""
         return self._svc_dim(pol, requested, [])
 
+    def addr_ip_overlap(self, pol: dict, key: str, target: str) -> bool:
+        """True if any resolvable IP range in pol[key] overlaps target.
+
+        Ignores FQDN, geo, and other unresolvable refs — only concrete IP
+        networks count. Returns False when target is not a valid IP/CIDR.
+        """
+        try:
+            target_net = ipaddress.ip_network(target, strict=False)
+        except ValueError:
+            return False
+        for name in _names(pol.get(key, [])):
+            resolved = self._addr.networks_for_ref(name)
+            if resolved is None:
+                continue
+            if any(target_net.overlaps(n) for n in resolved):
+                return True
+        return False
+
+    def uncovered_services(self, pol: dict, requested: list[PortRange]) -> list[PortRange]:
+        """Return requested PortRanges not fully contained by this policy's services."""
+        refs = _names(pol.get("service", []))
+        ranges: list[PortRange] = []
+        for name in refs:
+            resolved = self._svc.ranges_for_ref(name)
+            if resolved is not None:
+                ranges.extend(resolved)
+        return [req for req in requested if not any(r.contains(req) for r in ranges)]
+
     # ------------------------------------------------------------------
 
     def _addr_dim(self, pol: dict, key: str, target: str, unknown: list[str]):
