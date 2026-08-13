@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>4tAnalyst Admin{% block title_suffix %}{% endblock %}</title>
+  <link rel="stylesheet" href="/admin/static/admin.css">
+</head>
+<body>
+<nav class="navbar">
+  <span class="navbar-brand">4tAnalyst</span>
+  <div class="nav-links">
+    <a href="/admin/dashboard"{% if active_tab == 'dashboard' %} class="active"{% endif %}>Dashboard</a>
+    <a href="/admin/graph"{% if active_tab == 'graph' %} class="active"{% endif %}>Graph</a>
+    {% if user.role == 'admin' %}
+    <a href="/admin/adoms"{% if active_tab == 'adoms' %} class="active"{% endif %}>Admin</a>
+    {% endif %}
+  </div>
+  <div class="nav-user">
+    {{ user.username }} ({{ user.role }})
+    &nbsp;<a href="/admin/logout">Logout</a>
+  </div>
+</nav>
+<main>{% block content %}{% endblock %}</main>
+<script src="/admin/static/chart.min.js"></script>
+<script src="/admin/static/admin.js"></script>
+</body>
+</html>

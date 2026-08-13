@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>4tAnalyst Admin - Login</title>
+  <link rel="stylesheet" href="/admin/static/admin.css">
+</head>
+<body class="login-page">
+<div class="login-box">
+  <h1>4tAnalyst</h1>
+  {% if error %}<div class="alert alert-error">{{ error }}</div>{% endif %}
+  <form method="post" action="/admin/login">
+    <label for="username">Username</label>
+    <input type="text" id="username" name="username" required autofocus>
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" required>
+    <button type="submit">Sign In</button>
+  </form>
+</div>
+</body>
+</html>

@@ -57,6 +57,10 @@ feedback.db
 feedback.db-wal
 feedback.db-shm
 
+# Web admin runtime data
+data/users.json
+data/analytics.db
+
 # Editors
 .idea/
 .vscode/
@@ -82,3 +86,5 @@ graphify-out/
 
 # Superpowers worktrees (local scratch)
 .worktrees/
+
+scripts/sync-to-github.sh

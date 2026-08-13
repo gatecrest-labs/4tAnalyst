@@ -42,6 +42,12 @@ uv run python standards_mcp/build_policy_db.py
 
 # Smoke check (server must be running; asserts 401 without token, 200 with)
 uv run python scripts/run_smoke.py
+
+# Create a web admin user (server can be stopped or running)
+python -m fwanalyst_server.admin create-user <username> --role admin|viewer
+
+# Web admin UI (once server is running in HTTP mode)
+# http://<server>:8000/admin
 ```
 
 ## Architecture
@@ -55,7 +61,7 @@ uv run python scripts/run_smoke.py
 | Package | Status | Description |
 |---|---|---|
 | `planner` | **Complete** | **Deterministic change planner** — the product core. `plan_change()` computes verdict, coverage, reuse, insertion, CLI. Also a standalone CLI (`python -m planner`) |
-| `fwanalyst_server` | **Complete** | Unified MCP server (port 8000, streamable-HTTP, static-bearer auth, fail-closed) aggregating all tools + `plan_change` |
+| `fwanalyst_server` | **Complete** | Unified MCP server (port 8000, streamable-HTTP, static-bearer auth, fail-closed) aggregating all tools + `plan_change`. Includes web admin UI at `/admin` (local account auth, system health dashboard, token usage analytics, ADOM management). |
 | `standards_mcp` | **Complete** | Zone matrix, naming.yaml, review_requirements.yaml, static policy evaluation |
 | `fortimanager_mcp` | **Complete** | Read-only FortiManager JSON-RPC queries (7.4/7.6) + `matching.py` set-semantics layer |
 | `feedback_mcp` | **Complete** | SQLite decision/audit store with similarity lookup |

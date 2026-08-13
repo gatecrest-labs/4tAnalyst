@@ -4,6 +4,16 @@ This guide covers everything a firewall engineer needs to use 4tAnalyst once the
 
 ---
 
+## Admin dashboard
+
+The 4tAnalyst server includes a web admin interface at `http://<server>:8000/admin`.
+Engineers with viewer access can check the system health dashboard and view usage analytics.
+Admins additionally manage ADOM access restrictions and user accounts.
+
+See [Web Admin Interface](web-admin.md) for full details.
+
+---
+
 ## 1. Workstation setup
 
 You need three things on your laptop: Claude Code, a slim sparse-checkout of this repo, and a pointer to the central MCP server. You never install Python, credentials, or any MCP packages locally, and you never handle FortiManager/4THealth API keys — those live only on the central RHEL server (see `SECURITY.md`).
