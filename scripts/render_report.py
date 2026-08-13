@@ -150,7 +150,23 @@ def esc(value) -> str:
     return html.escape(str(value))
 
 
-def render_html(data: dict) -> str:
+def _render_meta_line(generated_at: str, model: str, cost_usd: str) -> str:
+    parts = []
+    if generated_at:
+        parts.append(f"Generated: <code>{esc(generated_at)}</code>")
+    if model:
+        parts.append(f"AI model: <code>{esc(model)}</code>")
+    if cost_usd:
+        parts.append(f"Est. cost: <code>${esc(cost_usd)}</code>")
+    return " &nbsp;·&nbsp; ".join(parts)
+
+
+def render_html(
+    data: dict,
+    generated_at: str = "",
+    model: str = "",
+    cost_usd: str = "",
+) -> str:
     request = data["request"]
     zone = data["zone_verdict"]
     existing = data["existing_rules"]
@@ -408,6 +424,7 @@ def render_html(data: dict) -> str:
     <div class="kicker">4tAnalyst · /analyze-request</div>
     <h1>Firewall Request Analysis</h1>
     <div class="meta">Ticket: <code>{esc(ticket)}</code></div>
+    <div class="meta" style="margin-top:6px">{_render_meta_line(generated_at, model, cost_usd)}</div>
   </header>
 
   <section>
@@ -487,6 +504,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", required=True, help="Path to the JSON payload")
     parser.add_argument("--outdir", required=True, help="Base output directory")
+    parser.add_argument("--model", default="", help="AI model name shown in report header")
+    parser.add_argument("--cost-usd", default="", dest="cost_usd",
+                        help="Estimated AI cost in USD shown in report header")
     args = parser.parse_args(argv)
 
     data_path = Path(args.data)
@@ -503,14 +523,19 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: invalid payload: {exc}", file=sys.stderr)
         return 1
 
-    outdir = Path(args.outdir) / output_dir_name(data)
+    folder_name = output_dir_name(data)
+    outdir = Path(args.outdir) / folder_name
     outdir.mkdir(parents=True, exist_ok=True)
 
-    html_path = outdir / "report.html"
+    html_path = outdir / f"report-{folder_name}.html"
     conf_path = outdir / "implementation.conf"
     data_path = outdir / "payload.json"
 
-    html_path.write_text(render_html(data), encoding="utf-8")
+    generated_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    html_path.write_text(
+        render_html(data, generated_at=generated_at, model=args.model, cost_usd=args.cost_usd),
+        encoding="utf-8",
+    )
     conf_path.write_text(render_conf(data), encoding="utf-8")
     data_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
