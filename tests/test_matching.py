@@ -471,18 +471,18 @@ def test_addr_ip_overlap_ignores_fqdn_refs():
     m = PolicyMatcher(addr, svc)
     # FQDN_AVAYA resolves to None (unknown/FQDN type not in catalog)
     pol = _pol(dstaddr=["FQDN_AVAYA"])
-    assert not m.addr_ip_overlap(pol, "dstaddr", "52.116.196.54")
+    assert not m.addr_ip_overlap(pol, "dstaddr", "203.0.113.54")
 
 
 def test_addr_ip_overlap_true_when_any_ref_overlaps_even_if_others_are_fqdn():
     """If at least one ref resolves and overlaps, return True despite other FQDNs."""
     addr = AddressCatalog(
-        [{"name": "H_52", "type": "ipmask", "subnet": "52.116.196.0/24"}],
+        [{"name": "H_52", "type": "ipmask", "subnet": "203.0.113.0/24"}],
         [],
     )
     m = PolicyMatcher(addr, ServiceCatalog([], []))
     pol = _pol(dstaddr=["FQDN_UNKNOWN", "H_52"])
-    assert m.addr_ip_overlap(pol, "dstaddr", "52.116.196.54")
+    assert m.addr_ip_overlap(pol, "dstaddr", "203.0.113.54")
 
 
 # ---------------------------------------------------------------------------

@@ -113,6 +113,22 @@ class FakeFMGClient:
              "status": "up"},
         ]
 
+    def get_device_vdoms(self, adom, device):
+        return [{"name": "root"}]
+
+    def get_routing_table_live(self, adom, device):
+        # Simulate proxy unavailable so tests exercise the CMDB fallback path.
+        raise FortiManagerAPIError("proxy unavailable in test", code=-6)
+
+    def get_routing_table(self, adom, device):
+        return [
+            # device as a list simulates real FMG CMDB API behaviour on some versions.
+            {"seq-num": 1, "dst": "0.0.0.0 0.0.0.0", "gateway": "203.0.113.1",
+             "device": ["wan1"], "status": "enable", "_vdom": "root"},
+            {"seq-num": 2, "dst": "10.0.0.0 255.0.0.0", "gateway": "",
+             "device": "port1", "status": "enable", "_vdom": "root"},
+        ]
+
     def get_device_meta(self, adom, device):
         return {"os_ver": "7", "mr": 4, "patch": 2}
 
@@ -148,12 +164,118 @@ def test_resolve_interfaces_by_subnet():
     assert warnings == []
 
 
-def test_resolve_interfaces_ambiguous_warns():
+def test_resolve_interfaces_via_routing_table():
+    # 192.168.1.1 has no connected subnet on any interface, but the default
+    # route 0.0.0.0/0 → wan1 should resolve it via routing table fallback.
     snap = fetch_device_snapshot(FakeFMGClient(), "root", "FW1")
     srcintf, dstintf, warnings = resolve_interfaces(snap, "192.168.1.1", "10.9.8.7")
+    assert srcintf == "wan1"
+    assert dstintf == "port2"
+    assert any("routing table" in w for w in warnings)
+
+
+def test_resolve_interfaces_unresolvable_warns():
+    # Remove routing table from snapshot so we get the "manual" fallback.
+    import dataclasses
+    snap = fetch_device_snapshot(FakeFMGClient(), "root", "FW1")
+    snap2 = dataclasses.replace(snap, routing_table=[])
+    srcintf, dstintf, warnings = resolve_interfaces(snap2, "192.168.1.1", "10.9.8.7")
     assert srcintf == ""
     assert dstintf == "port2"
     assert any("192.168.1.1" in w for w in warnings)
+
+
+def test_parse_live_routes_vdom_star_envelope():
+    """_parse_live_routes must decode the double-nested vdom=* proxy envelope.
+
+    Actual FMG proxy field names:
+        ip_mask   : CIDR string e.g. "10.10.15.0/24"
+        interface : egress interface name e.g. "ae0.100"
+        type      : lowercase full word e.g. "bgp", "static", "connected"
+    """
+    from fortimanager_mcp.query import _parse_live_routes
+    raw = [
+        {
+            "http_status": 200,
+            "response": {
+                "results": [
+                    {
+                        "vdom": "root",
+                        "results": [
+                            {"ip_mask": "10.10.15.0/24", "interface": "ae0.100",
+                             "gateway": "", "type": "bgp", "distance": 20},
+                            {"ip_mask": "0.0.0.0/0", "interface": "wan1",
+                             "gateway": "203.0.113.1", "type": "static", "distance": 10},
+                        ],
+                    }
+                ]
+            },
+            "target": "/adom/EXAMPLE-ADOM/device/EXAMPLE-FW01",
+        }
+    ]
+    routes = _parse_live_routes(raw)
+    assert routes is not None
+    assert len(routes) == 2
+    bgp_route = next(r for r in routes if r["device"] == "ae0.100")
+    assert bgp_route["dst"] == "10.10.15.0/24"
+    assert bgp_route["vdom"] == "root"
+    default_route = next(r for r in routes if r["device"] == "wan1")
+    assert default_route["dst"] == "0.0.0.0/0"
+
+
+def test_parse_live_routes_single_vdom_flat():
+    """_parse_live_routes handles single-vdom response where results is flat route list."""
+    from fortimanager_mcp.query import _parse_live_routes
+    raw = [
+        {
+            "http_status": 200,
+            "response": {
+                "results": [
+                    {"ip_mask": "10.0.0.0/8", "interface": "port1",
+                     "gateway": "", "type": "connected", "distance": 0},
+                    {"ip_mask": "0.0.0.0/0", "interface": "wan1",
+                     "gateway": "1.2.3.4", "type": "static", "distance": 10},
+                ],
+                "vdom": "root",
+            },
+        }
+    ]
+    routes = _parse_live_routes(raw)
+    assert routes is not None
+    devices = {r["device"] for r in routes}
+    assert "port1" in devices
+    assert "wan1" in devices
+
+
+def test_live_route_table_used_when_proxy_succeeds():
+    """get_routing_table uses live proxy data (BGP routes) when available."""
+    from fortimanager_mcp.query import get_routing_table
+
+    class FakeFMGLiveClient(FakeFMGClient):
+        def get_routing_table_live(self, adom, device):
+            return [
+                {
+                    "http_status": 200,
+                    "response": {
+                        "results": [
+                            {
+                                "vdom": "root",
+                                "results": [
+                                    {"ip_mask": "10.10.15.0/24", "interface": "ae0.100",
+                                     "gateway": "", "type": "bgp", "distance": 20},
+                                    {"ip_mask": "0.0.0.0/0", "interface": "wan1",
+                                     "gateway": "203.0.113.1", "type": "static", "distance": 10},
+                                ],
+                            }
+                        ]
+                    },
+                }
+            ]
+
+    routes = get_routing_table(FakeFMGLiveClient(), "root", "FW1")
+    devices = {r["device"] for r in routes}
+    assert "ae0.100" in devices, "BGP route via ae0.100 must come from live table"
+    assert "wan1" in devices
 
 
 class FakeZoneClient:
@@ -675,17 +797,16 @@ def test_direct_append_offered_when_no_group_on_failing_side():
     assert not alt.affected_policies           # only one rule affected
 
 
-def _seeburger_fmg():
-    """Fake FMG mimicking the SEEBURGER / RITM0892999 scenario:
-    a specific near-miss rule (exact dst + svc, direct host src) alongside a
-    broad catch-all rule (group src, dst=all).  The specific rule must win.
+def _vendor_app_fmg():
+    """Fake FMG with a specific near-miss rule (exact dst + svc, direct host src)
+    alongside a broad catch-all rule (group src, dst=all).  The specific rule must win.
 
     GRP_BROAD contains H_SOMEOTHER (10.99.0.5/32) — NOT the request src
     10.1.2.3 — so the catch-all does not fully cover the flow and both rules
     become near-miss candidates that the ranker must choose between."""
     pols = [
         # Specific near-miss: H_OLD_SRC ≠ 10.1.2.3, but dst and svc are exact
-        {"policyid": 110221, "name": "SEEBURGER - ESB Support", "status": "enable",
+        {"policyid": 110221, "name": "VENDOR-APP - ESB Support", "status": "enable",
          "action": 1, "schedule": ["always"],
          "srcaddr": ["H_OLD_SRC"], "dstaddr": ["H_EXACT_DST"],
          "service": ["SVC_TCP_8443"], "srcintf": ["port1"], "dstintf": ["port2"],
@@ -714,14 +835,14 @@ def _seeburger_fmg():
 
 def test_direct_append_preferred_over_group_catch_all():
     # The specific rule (exact dst + svc, direct src) should be chosen over the
-    # catch-all group-append rule.  This is the SEEBURGER/RITM0892999 scenario.
-    plan = _run(service="tcp/8443", fmg=_seeburger_fmg())
+    # catch-all group-append rule.
+    plan = _run(service="tcp/8443", fmg=_vendor_app_fmg())
     fw = plan.firewalls[0]
     alt = fw.alternative
     assert alt is not None
     # must point to the specific rule, not the catch-all
     assert alt.policy_id == 110221
-    assert alt.policy_name == "SEEBURGER - ESB Support"
+    assert alt.policy_name == "VENDOR-APP - ESB Support"
     assert alt.group is None                   # direct-append
     assert alt.side == "source"
     assert "append srcaddr" in alt.direct_cli
@@ -730,7 +851,7 @@ def test_direct_append_preferred_over_group_catch_all():
 
 
 def test_direct_append_alternative_in_payload():
-    plan = _run(service="tcp/8443", fmg=_seeburger_fmg())
+    plan = _run(service="tcp/8443", fmg=_vendor_app_fmg())
     payload = to_report_payload(plan)
     validate_payload(payload)
     entry = payload["cli"]["per_firewall"][0]
@@ -746,11 +867,11 @@ def test_direct_append_alternative_in_payload():
 
 
 def _wind_farms_fmg():
-    """Two near-miss candidates where Wind Farms has more dst refs than SEEBURGER.
-    SEEBURGER (1 exact dst ref) must beat Wind Farms (4 dst refs) because fewer
+    """Two near-miss candidates where Wind Farms has more dst refs than VendorApp.
+    VendorApp (1 exact dst ref) must beat Wind Farms (4 dst refs) because fewer
     non-failing-side refs means the rule is more targeted at this specific flow."""
     pols = [
-        {"policyid": 110221, "name": "SEEBURGER - ESB Support", "status": "enable",
+        {"policyid": 110221, "name": "VENDOR-APP - ESB Support", "status": "enable",
          "action": 1, "schedule": ["always"],
          "srcaddr": ["H_OLD_SRC"], "dstaddr": ["H_EXACT_DST"],
          "service": ["SVC_TCP_8443"], "srcintf": ["port1"], "dstintf": ["port2"],
@@ -778,7 +899,7 @@ def _wind_farms_fmg():
 
 
 def test_targeted_rule_preferred_over_broad_many_refs():
-    # SEEBURGER has exactly 1 dst ref matching our flow; Wind Farms has 4 dst refs
+    # VendorApp has exactly 1 dst ref matching our flow; Wind Farms has 4 dst refs
     # (ours + 3 others).  The rule with fewer non-failing-side refs must win —
     # more refs means the rule covers many unrelated flows, not this one specifically.
     plan = _run(service="tcp/8443", fmg=_wind_farms_fmg())
@@ -786,9 +907,9 @@ def test_targeted_rule_preferred_over_broad_many_refs():
     alt = fw.alternative
     assert alt is not None, "expected a near-miss alternative"
     assert alt.policy_id == 110221, (
-        f"expected SEEBURGER (110221), got rule #{alt.policy_id} '{alt.policy_name}'"
+        f"expected VENDOR-APP (110221), got rule #{alt.policy_id} '{alt.policy_name}'"
     )
-    assert alt.policy_name == "SEEBURGER - ESB Support"
+    assert alt.policy_name == "VENDOR-APP - ESB Support"
     assert alt.group is None    # direct-append, no group
     assert alt.side == "source"
 

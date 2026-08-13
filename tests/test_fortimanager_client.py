@@ -232,15 +232,15 @@ def test_list_device_vdoms():
 
 def test_search_devices_filters_combine_with_and():
     fake = FakeStatusFMG(devices=[
-        {"name": "MNHQ-FW01", "ip": "10.1.1.1", "platform_str": "FortiGate-VM64",
+        {"name": "SITE1-FW01", "ip": "10.1.1.1", "platform_str": "FortiGate-VM64",
          "os_ver": "7.4", "conn_status": 1, "db_status": "modified"},
-        {"name": "MNHQ-FW02", "ip": "10.1.1.2", "platform_str": "FortiGate-100F",
+        {"name": "SITE1-FW02", "ip": "10.1.1.2", "platform_str": "FortiGate-100F",
          "os_ver": "7.2", "conn_status": 2, "db_status": "insync"},
     ])
-    out = query.search_devices(fake, "adom1", name_filter="MNHQ", platform_filter="VM",
+    out = query.search_devices(fake, "adom1", name_filter="SITE1", platform_filter="VM",
                                 connection_status="up")
     assert out["count"] == 1
-    assert out["devices"][0]["name"] == "MNHQ-FW01"
+    assert out["devices"][0]["name"] == "SITE1-FW01"
     assert out["devices"][0]["conn_status"] == "up"
 
 

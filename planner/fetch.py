@@ -18,6 +18,7 @@ from fortimanager_mcp.query import (
     _package_targets_device,
     build_catalogs,
     get_device_policies,
+    get_routing_table,
 )
 from fortimanager_mcp.zone_map import load_zone_map, lookup_policy_zone
 from planner.models import PlannerDataError
@@ -33,6 +34,7 @@ class DeviceSnapshot:
     addr_catalog: AddressCatalog
     svc_catalog: ServiceCatalog
     interfaces: list[dict]
+    routing_table: list[dict] = field(default_factory=list)
     zone_map_warnings: list[str] = field(default_factory=list)
     degraded: bool = False
     failures: list[str] = field(default_factory=list)
@@ -98,6 +100,14 @@ def fetch_device_snapshot(
     except FortiManagerAPIError as exc:
         failures.append(f"interfaces: {exc}")
 
+    routing_table: list[dict] = []
+    try:
+        routing_table = get_routing_table(client, adom, device)
+    except Exception:
+        # Routing table is used only for interface-name resolution — failure
+        # here does not affect coverage analysis, so do not set degraded.
+        pass
+
     return DeviceSnapshot(
         device=device,
         adom=adom,
@@ -106,6 +116,7 @@ def fetch_device_snapshot(
         addr_catalog=addr_catalog,
         svc_catalog=svc_catalog,
         interfaces=interfaces,
+        routing_table=routing_table,
         zone_map_warnings=zone_map_warnings,
         degraded=bool(failures),
         failures=failures,
@@ -215,6 +226,25 @@ def fetch_zone_domains(zc: ZonePolicyClient) -> dict[str, str]:
     }
 
 
+def _route_network(route: dict):
+    """Parse the dst field of a static route into an ip_network.
+
+    Unlike _iface_network, 0.0.0.0/0 (the default route) is valid here.
+    """
+    raw = route.get("dst", "")
+    if isinstance(raw, list) and len(raw) == 2:
+        raw = f"{raw[0]}/{raw[1]}"
+    elif isinstance(raw, str) and " " in raw:
+        addr, mask = raw.split(None, 1)
+        raw = f"{addr}/{mask.strip()}"
+    if not raw:
+        return None
+    try:
+        return ipaddress.ip_network(str(raw), strict=False)
+    except ValueError:
+        return None
+
+
 def _iface_network(iface: dict):
     raw = iface.get("ip", "")
     if isinstance(raw, list) and len(raw) == 2:
@@ -287,6 +317,29 @@ def _resolve_one(
                 "device_zone_map policy zone, not a connected subnet — verify"
             )
             return iface.get("name", "")
+    # Third fallback: longest-prefix match on the static routing table.
+    # Catches internet-bound destinations (default route) and routed internal
+    # subnets that are not directly connected on this firewall.
+    best_route = ("", -1)
+    for route in snapshot.routing_table:
+        if route.get("status", "enable") != "enable":
+            continue
+        net = _route_network(route)
+        raw_dev = route.get("device", "")
+        # FMG CMDB occasionally returns device as a list — always coerce to str.
+        iface_name = (
+            raw_dev[0] if isinstance(raw_dev, list) and raw_dev
+            else raw_dev if isinstance(raw_dev, str)
+            else str(raw_dev)
+        )
+        if net is not None and iface_name and net.overlaps(target) and net.prefixlen > best_route[1]:
+            best_route = (iface_name, net.prefixlen)
+    if best_route[0]:
+        warnings.append(
+            f"{label} {ip} resolved interface {best_route[0]!r} via routing table "
+            "longest-prefix match — verify before implementation"
+        )
+        return best_route[0]
     warnings.append(
         f"Could not resolve {label.lower()} {ip} to an interface on "
         f"{snapshot.device} — engineer must set the interface manually"

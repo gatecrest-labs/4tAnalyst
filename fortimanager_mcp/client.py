@@ -389,11 +389,19 @@ class FortiManagerClient:
         return self._rpc("get", f"/pm/config/device/{device}/global/system/interface", params)
 
     def _proxy(self, action: str, resource: str, target: list[str]) -> Any:
-        """Execute a FortiGate REST call via FortiManager's device proxy (EXEC /sys/proxy/json)."""
+        """Execute a FortiGate REST call via FortiManager's device proxy (EXEC /sys/proxy/json).
+
+        FMG JSON-RPC requires proxy parameters nested under a "data" key:
+            params[0] = {"url": "/sys/proxy/json", "data": {"action": ..., "resource": ..., "target": ...}}
+
+        _rpc spreads the params dict with "url", so passing {"data": {...}} produces the correct shape.
+        """
         return self._rpc("exec", "/sys/proxy/json", {
-            "action": action,
-            "resource": resource,
-            "target": target,
+            "data": {
+                "action": action,
+                "resource": resource,
+                "target": target,
+            }
         })
 
     def get_device_client_location(self, adom: str, device: str) -> Any:
@@ -419,11 +427,51 @@ class FortiManagerClient:
     # Routing table
     # ------------------------------------------------------------------
 
-    def get_routing_table(self, adom: str, device: str) -> list[dict]:
-        """Return static routes configured on a managed device."""
-        return self._get_all(
-            f"/pm/config/device/{device}/vdom/root/router/static"
+    def get_routing_table_live(self, adom: str, device: str) -> Any:
+        """Return the live IPv4 routing table via FMG proxy with vdom=*.
+
+        Uses the FortiGate monitor API so BGP, OSPF, and connected routes
+        are included — not just configured static routes. Returns the raw
+        proxy envelope; callers must unpack it with _parse_live_routes().
+        Raises FortiManagerAPIError if the proxy call fails.
+        """
+        return self._proxy(
+            action="get",
+            resource="/api/v2/monitor/router/ipv4?vdom=*",
+            target=[f"/adom/{adom}/device/{device}"],
         )
+
+    def get_routing_table(self, adom: str, device: str) -> list[dict]:
+        """Return static routes across all VDOMs configured on a managed device.
+
+        Iterates every VDOM returned by get_device_vdoms (falling back to
+        'root' for non-VDOM devices). One VDOM's failure is skipped rather
+        than propagated so partially-configured devices return what they have.
+        """
+        try:
+            vdom_names = [
+                v.get("name", "root")
+                for v in self.get_device_vdoms(adom, device)
+                if isinstance(v, dict) and v.get("name")
+            ]
+        except Exception:
+            vdom_names = []
+        if not vdom_names:
+            vdom_names = ["root"]
+
+        routes: list[dict] = []
+        for vname in vdom_names:
+            try:
+                for route in self._get_all(
+                    f"/pm/config/device/{device}/vdom/{vname}/router/static"
+                ):
+                    if isinstance(route, dict):
+                        r = dict(route)
+                        r.setdefault("_vdom", vname)
+                        routes.append(r)
+            except Exception:
+                pass
+        return routes
 
     # ------------------------------------------------------------------
     # Context manager support

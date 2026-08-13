@@ -187,7 +187,7 @@ def test_main_writes_both_files_under_ticket_id_folder(tmp_path):
     rc = render_report.main(["--data", str(data_file), "--outdir", str(outdir)])
 
     assert rc == 0
-    assert (outdir / "CHG0012345" / "report.html").exists()
+    assert (outdir / "CHG0012345" / "report-CHG0012345.html").exists()
     assert (outdir / "CHG0012345" / "implementation.conf").exists()
     assert (outdir / "CHG0012345" / "payload.json").exists()
 
@@ -202,8 +202,9 @@ def test_main_writes_both_files_under_timestamp_folder_when_no_ticket(tmp_path):
     assert rc == 0
     subdirs = list(outdir.iterdir())
     assert len(subdirs) == 1
-    assert re.match(r"^\d{4}-\d{2}-\d{2}_\d{4}$", subdirs[0].name)
-    assert (subdirs[0] / "report.html").exists()
+    ts = subdirs[0].name
+    assert re.match(r"^\d{4}-\d{2}-\d{2}_\d{4}$", ts)
+    assert (subdirs[0] / f"report-{ts}.html").exists()
     assert (subdirs[0] / "implementation.conf").exists()
 
 
@@ -216,7 +217,7 @@ def test_main_overwrites_existing_files_for_same_ticket(tmp_path):
     data_file.write_text(_json.dumps(_minimal_payload(ticket_id="CHG0012345", recommendation="second run")))
     render_report.main(["--data", str(data_file), "--outdir", str(outdir)])
 
-    html_content = (outdir / "CHG0012345" / "report.html").read_text()
+    html_content = (outdir / "CHG0012345" / "report-CHG0012345.html").read_text()
     assert "second run" in html_content
     assert "first run" not in html_content
 
@@ -253,7 +254,7 @@ def test_render_html_existing_rules_show_rule_detail_table():
     """Each rule in Existing Rules must show src/dst/service objects, not just ID."""
     payload = _minimal_payload(
         existing_rules={
-            "MNHQGOFWENTM01": {
+            "EXAMPLE-FW01": {
                 "status": "ALREADY COVERED",
                 "rules": [
                     {
@@ -261,7 +262,7 @@ def test_render_html_existing_rules_show_rule_detail_table():
                         "name": "SSH and HTTPS",
                         "package": "OT-pkg",
                         "status": "enable",
-                        "source": ["H_10.152.12.12", "H_10.152.14.164"],
+                        "source": ["H_10.10.12.12", "H_10.10.14.164"],
                         "destination": ["NET_10.255.0.0_16"],
                         "service": ["TCP_22", "HTTPS"],
                         "full_cover": True,
@@ -273,7 +274,7 @@ def test_render_html_existing_rules_show_rule_detail_table():
                         "name": "SSH and HTTPS",
                         "package": "OT-pkg",
                         "status": "enable",
-                        "source": ["H_10.152.12.12", "H_10.152.14.164"],
+                        "source": ["H_10.10.12.12", "H_10.10.14.164"],
                         "destination": ["NET_10.255.0.0_16"],
                         "service": ["TCP_22", "HTTPS"],
                         "full_cover": True,
@@ -292,8 +293,8 @@ def test_render_html_existing_rules_show_rule_detail_table():
     assert "SSH and HTTPS" in html_out
 
     # Must show source objects
-    assert "H_10.152.12.12" in html_out
-    assert "H_10.152.14.164" in html_out
+    assert "H_10.10.12.12" in html_out
+    assert "H_10.10.14.164" in html_out
 
     # Must show destination objects
     assert "NET_10.255.0.0_16" in html_out
@@ -310,7 +311,7 @@ def test_render_html_partial_matches_shown_separately():
     """Partial matches must be visually separated from covering rules."""
     payload = _minimal_payload(
         existing_rules={
-            "MNHQGOFWENTM01": {
+            "EXAMPLE-FW01": {
                 "status": "NEW RULE",
                 "rules": [
                     {
@@ -367,7 +368,7 @@ def test_render_html_partial_match_svc_gap_shown():
                         "package": "pkg",
                         "status": "enable",
                         "source": ["all"],
-                        "destination": ["corp-internal-nets"],
+                        "destination": ["internal-nets"],
                         "service": ["UDP-1024-65535"],
                         "full_cover": False,
                         "svc_gap": ["tcp/33001"],
@@ -394,14 +395,14 @@ def test_render_html_near_miss_match_reason_shown():
                 "partial_matches": [
                     {
                         "policy_id": 110221,
-                        "name": "SEEBURGER - ESB Support",
+                        "name": "VENDOR-APP - ESB Support",
                         "package": "pkg",
                         "status": "enable",
-                        "source": ["GRP_SEEBURGER_SRC"],
-                        "destination": ["h-52.116.196.54"],
+                        "source": ["GRP_VENDOR_SRC"],
+                        "destination": ["h-203.0.113.54"],
                         "service": ["TCP-33001", "UDP-33001"],
                         "full_cover": False,
-                        "match_reason": "Source missing — H_10.152.15.25 not yet in address list",
+                        "match_reason": "Source missing — H_10.10.15.25 not yet in address list",
                     }
                 ],
                 "note": "No covering rule.",
@@ -412,7 +413,7 @@ def test_render_html_near_miss_match_reason_shown():
     html = render_report.render_html(payload)
     assert "Near miss" in html
     assert "Source missing" in html
-    assert "H_10.152.15.25" in html
+    assert "H_10.10.15.25" in html
     assert "Near miss" in html
     # Generic overlap note must NOT appear for near-miss cards
     assert "does not fully cover it" not in html

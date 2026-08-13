@@ -812,24 +812,197 @@ def get_device_interface_config(
 # Routing table
 # ---------------------------------------------------------------------------
 
+def _normalize_live_route(r: dict, vdom: str) -> "dict | None":
+    """Convert one FortiOS monitor route dict to the common normalized format.
+
+    Actual field names from FMG proxy /api/v2/monitor/router/ipv4:
+        ip_mask   : CIDR string already formatted, e.g. "10.152.15.0/24" or "0.0.0.0/0"
+        interface : egress interface name, e.g. "ae0.1705"
+        type      : "bgp", "connected", "static", "ospf" (lowercase full word)
+        gateway   : next-hop IP string
+        distance  : administrative distance int
+        priority  : priority int
+
+    Older firmware may use FortiGate REST API names (ip + mask + dev) — both
+    are tried so this function handles either format.
+    """
+    # ip_mask is the FMG-proxy field name; fall back to ip+mask for older firmware
+    dst = r.get("ip_mask", "")
+    if not dst:
+        ip = r.get("ip", "")
+        if not ip:
+            return None
+        mask_raw = r.get("mask", "")
+        try:
+            if isinstance(mask_raw, int):
+                dst = f"{ip}/{mask_raw}"
+            elif "." in str(mask_raw):
+                import ipaddress as _ip
+                prefix = _ip.IPv4Network(f"0.0.0.0/{mask_raw}", strict=False).prefixlen
+                dst = f"{ip}/{prefix}"
+            else:
+                dst = f"{ip}/{mask_raw}" if mask_raw else ip
+        except Exception:
+            dst = ip
+
+    # "interface" is the FMG-proxy field; "dev" is the FortiGate REST API name
+    iface = r.get("interface", "") or r.get("dev", "")
+    if not iface:
+        return None
+
+    return {
+        "seq_num": 0,
+        "dst": dst,
+        "gateway": r.get("gateway", ""),
+        "device": iface,
+        "distance": r.get("distance", 0),
+        "priority": r.get("priority", 0),
+        "comment": r.get("type", ""),
+        "status": "enable",
+        "vdom": vdom,
+    }
+
+
+def _parse_live_routes(raw: Any) -> "list[dict] | None":
+    """Unpack the FMG proxy envelope for /api/v2/monitor/router/ipv4?vdom=*.
+
+    After _rpc unwrapping, 'raw' is a list containing one device-wrapper dict:
+        [
+            {
+                "response": {
+                    "results": [           # per-vdom list (vdom=* case)
+                        {"results": [...routes...], "vdom": "root"},
+                        {"results": [...routes...], "vdom": "other"},
+                    ]
+                },
+                "http_status": 200,
+                ...
+            }
+        ]
+
+    The key detail: response["results"] is a list of per-vdom objects, and each
+    of those has its OWN "results" key containing the actual route dicts.  This
+    is the double-nested structure that vdom=* creates.
+
+    For a single-vdom query (vdom=root), response["results"] is already the flat
+    route list with no inner "results" key.
+
+    Each route dict has: ip, mask (dotted or int prefix), dev, gateway, distance,
+    type ("B"=BGP, "C"=connected, "S"=static, "O"=OSPF).
+
+    Returns None when the shape is unrecognised — caller falls back to CMDB.
+    """
+    if raw is None:
+        return None
+
+    # Step 1: get the device-wrapper dict (first element of the outer list)
+    if isinstance(raw, list):
+        device_wrapper = raw[0] if raw and isinstance(raw[0], dict) else {}
+    elif isinstance(raw, dict):
+        device_wrapper = raw
+    else:
+        return None
+
+    # Step 2: unwrap .response — some FMG builds return it as a JSON string
+    response = device_wrapper.get("response", device_wrapper)
+    if isinstance(response, str):
+        try:
+            import json as _j
+            response = _j.loads(response)
+        except Exception:
+            return None
+
+    # Step 3: get the top-level results from response
+    if isinstance(response, dict):
+        payload = response.get("results", [])
+    elif isinstance(response, list):
+        payload = response
+    else:
+        return None
+
+    if not isinstance(payload, list) or not payload:
+        return None
+
+    routes: list[dict] = []
+
+    # Step 4: detect vdom=* (each element has its own "results" key with routes)
+    # vs single-vdom (payload is already the flat route list)
+    if isinstance(payload[0], dict) and "results" in payload[0]:
+        for vdom_item in payload:
+            if not isinstance(vdom_item, dict):
+                continue
+            vdom_name = vdom_item.get("vdom", "root")
+            inner = vdom_item.get("results", [])
+            if not isinstance(inner, list):
+                continue
+            for r in inner:
+                if isinstance(r, dict):
+                    route = _normalize_live_route(r, vdom_name)
+                    if route:
+                        routes.append(route)
+    else:
+        for r in payload:
+            if isinstance(r, dict):
+                route = _normalize_live_route(r, "root")
+                if route:
+                    routes.append(route)
+
+    return routes if routes else None
+
+
 def get_routing_table(
     client: FortiManagerClient, adom: str, device: str
 ) -> list[dict]:
-    """Return static routes configured on a device."""
+    """Return the active routing table for a device.
+
+    Tries the live FMG proxy API first (/api/v2/monitor/router/ipv4?vdom=*)
+    so BGP, OSPF, and connected routes are included.  Falls back to the CMDB
+    static-route config if the proxy call fails or returns nothing.
+    """
+    # --- live route table via FMG proxy (preferred) ---
+    try:
+        raw_live = client.get_routing_table_live(adom, device)
+        live_routes = _parse_live_routes(raw_live)
+        if live_routes:
+            logger.debug(
+                "get_routing_table %s/%s: live proxy returned %d routes",
+                adom, device, len(live_routes),
+            )
+            return live_routes
+        logger.warning(
+            "get_routing_table %s/%s: live proxy succeeded but returned no parseable routes "
+            "(raw type=%s, value=%r); falling back to CMDB statics",
+            adom, device, type(raw_live).__name__, raw_live,
+        )
+    except Exception as exc:
+        logger.warning(
+            "get_routing_table %s/%s: live proxy call failed (%s); "
+            "falling back to CMDB statics",
+            adom, device, exc,
+        )
+
+    # --- CMDB static routes (fallback) ---
     routes = client.get_routing_table(adom, device)
     result = []
     for r in routes:
         if not isinstance(r, dict):
             continue
+        raw_device = r.get("device", "")
+        device_str = (
+            raw_device[0] if isinstance(raw_device, list) and raw_device
+            else raw_device if isinstance(raw_device, str)
+            else str(raw_device)
+        )
         result.append({
             "seq_num": r.get("seq-num", 0),
             "dst": r.get("dst", ""),
             "gateway": r.get("gateway", ""),
-            "device": r.get("device", ""),
+            "device": device_str,
             "distance": r.get("distance", 10),
             "priority": r.get("priority", 0),
             "comment": r.get("comment", ""),
             "status": r.get("status", "enable"),
+            "vdom": r.get("_vdom", "root"),
         })
     result.sort(key=lambda r: r["seq_num"])
     return result
