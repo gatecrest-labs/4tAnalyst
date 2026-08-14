@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title_suffix %} - Dashboard{% endblock %}
+{% block content %}
+<h2>System Health</h2>
+<div class="metric-cards">
+  <div class="card"><span id="cpu-val">--</span><label>CPU</label></div>
+  <div class="card"><span id="mem-val">--</span><label>Memory</label></div>
+  <div class="card"><span id="disk-val">--</span><label>Disk</label></div>
+</div>
+<div class="range-selector" id="dash-ranges">
+  <button class="range-btn active" data-range="1h">1h</button>
+  <button class="range-btn" data-range="4h">4h</button>
+  <button class="range-btn" data-range="12h">12h</button>
+  <button class="range-btn" data-range="1d">1d</button>
+  <button class="range-btn" data-range="7d">7d</button>
+</div>
+<div class="chart-wrap"><canvas id="cpu-chart"></canvas></div>
+<div class="chart-wrap"><canvas id="mem-chart"></canvas></div>
+<div class="chart-wrap"><canvas id="disk-chart"></canvas></div>
+{% endblock %}

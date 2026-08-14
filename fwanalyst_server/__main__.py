@@ -12,11 +12,13 @@ import logging
 import os
 import stat
 import threading
+import time
 from pathlib import Path
 
 import yaml
 from mcp.server.transport_security import TransportSecuritySettings
 
+from fwanalyst_server import analytics
 from fwanalyst_server.auth import require_bearer
 from fwanalyst_server.rate_limit import rate_limit
 from fwanalyst_server.request_timeout import request_timeout
@@ -122,6 +124,37 @@ def _allowed_hosts() -> list[str]:
 _CACHE_REFRESH_INTERVAL = 2700  # 45 minutes — refresh well before the 1-hour TTL
 
 
+def _start_metrics_collector(db: "analytics.AnalyticsDB") -> None:
+    """Collect CPU/memory/disk every 60 seconds into analytics.db."""
+    def _loop() -> None:
+        import psutil
+        while True:
+            try:
+                cpu = psutil.cpu_percent(interval=1)
+                mem = psutil.virtual_memory().percent
+                disk = psutil.disk_usage("/").percent
+                db.log_system_metric(cpu, mem, disk)
+            except Exception as exc:
+                logger.debug("Metrics collection error: %s", exc)
+            time.sleep(59)  # 59s + 1s blocking cpu_percent ≈ 60s
+
+    threading.Thread(target=_loop, name="metrics-collector", daemon=True).start()
+
+
+def _start_retention_job(db: "analytics.AnalyticsDB", retention_days: int) -> None:
+    """Purge analytics records older than retention_days, running daily."""
+    def _loop() -> None:
+        while True:
+            time.sleep(86400)
+            try:
+                db.purge_old_records(retention_days)
+                logger.info("Analytics retention purge complete (%d days).", retention_days)
+            except Exception as exc:
+                logger.warning("Retention purge failed: %s", exc)
+
+    threading.Thread(target=_loop, name="retention-job", daemon=True).start()
+
+
 def _start_catalog_warmup(creds: dict) -> None:
     """Pre-populate the FortiManager catalog and policy caches, then keep them warm.
 
@@ -184,7 +217,7 @@ def _start_catalog_warmup(creds: dict) -> None:
 
             # Periodic refresh to keep caches from going cold
             while True:
-                threading.Event().wait(_CACHE_REFRESH_INTERVAL)
+                time.sleep(_CACHE_REFRESH_INTERVAL)
                 _warm_once(client, adoms, "refresh")
 
         except Exception as exc:
@@ -222,19 +255,69 @@ def main() -> None:
     # allowed_hosts restricted to localhost/127.0.0.1/[::1]) — fail-closed
     # rather than silently accepting any Host header.
 
-    app = mcp.streamable_http_app()
+    # ---------- Analytics DB ----------
+    data_dir = Path(os.getenv("DATA_DIR", str(_REPO_ROOT / "data")))
+    data_dir.mkdir(parents=True, exist_ok=True)
+    analytics_db_path = str(data_dir / "analytics.db")
+    users_path = str(data_dir / "users.json")
+    creds_path = str(Path(os.getenv("CREDENTIALS_FILE", str(_REPO_ROOT / "credentials.yaml"))))
 
-    _start_catalog_warmup(creds)
+    from fwanalyst_server import analytics as _analytics_mod
+    analytics_db = _analytics_mod.init(analytics_db_path)
+
+    # ---------- TokenRegistry ----------
+    from fwanalyst_server.context import token_registry
+    token_registry.load(creds)
+
+    # ---------- MCP ASGI stack ----------
+    mcp_app = mcp.streamable_http_app()
+
+    from fwanalyst_server.usage_middleware import UsageMiddleware
+    mcp_app = UsageMiddleware(mcp_app, analytics_db)
 
     max_requests = int(os.getenv("FW_ANALYST_RATE_LIMIT_MAX", str(_DEFAULT_RATE_LIMIT_MAX)))
     if max_requests > 0:
         window = float(os.getenv("FW_ANALYST_RATE_LIMIT_WINDOW_SECONDS",
                                   str(_DEFAULT_RATE_LIMIT_WINDOW)))
-        app = rate_limit(app, max_requests, window)
+        mcp_app = rate_limit(mcp_app, max_requests, window)
 
-    app = require_bearer(app, _auth_token(), creds)
+    mcp_app = require_bearer(mcp_app, _auth_token(), creds)
     timeout = float(os.getenv("FW_ANALYST_REQUEST_TIMEOUT", "540"))
-    app = request_timeout(app, timeout)
+    mcp_app = request_timeout(mcp_app, timeout)
+
+    # ---------- Admin web app (graceful degradation) ----------
+    web_admin = creds.get("web_admin", {})
+    secret_key = web_admin.get("secret_key", "")
+    if not secret_key.strip():
+        logger.warning(
+            "web_admin.secret_key missing in credentials.yaml — admin UI and /api/usage "
+            "are disabled. Generate one with: "
+            "python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+        app = mcp_app
+    else:
+        pricing = creds.get("pricing", {})
+        from fwanalyst_server.admin_app import create_admin_app
+        admin_app = create_admin_app(
+            secret_key=secret_key,
+            db=analytics_db,
+            users_path=users_path,
+            creds_path=creds_path,
+            pricing=pricing,
+            https_only=ssl_files is not None,
+        )
+        from fwanalyst_server.path_dispatcher import PathDispatcher
+        app = PathDispatcher(
+            routes={"/admin": admin_app, "/api": admin_app},
+            default=mcp_app,
+        )
+
+    # ---------- Background threads ----------
+    _start_catalog_warmup(creds)
+    _start_metrics_collector(analytics_db)
+    retention_days = int(web_admin.get("analytics_retention_days", 90))
+    _start_retention_job(analytics_db, retention_days)
+
     if ssl_files:
         certfile, keyfile = ssl_files
         logger.info("TLS enabled (cert %s)", certfile)

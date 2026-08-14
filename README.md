@@ -43,6 +43,19 @@ python -m planner --src "10.1.2.3, 10.1.2.4" --dst 10.9.8.7 \
 - All verdicts and recommendations are advisory. Engineers are accountable for every decision — the tool accelerates research, it does not replace judgment.
 - Zone policy verdicts reflect *intended segmentation policy*, not the actual current state of firewall rules. ALLOWED does not mean a rule exists on the firewall.
 
+## Web Admin Interface
+
+A browser-based admin panel at `http://<server>:8000/admin` provides:
+
+- **Dashboard** — real-time CPU, memory, and disk metrics with time-series charts (1h–7d)
+- **Graph** — AI token usage and estimated cost per engineer over configurable time ranges
+- **Admin tab** — manage engineer MCP tokens and their ADOM access restrictions; manage local user accounts
+
+Authentication uses local accounts (RADIUS/LDAP upgrade path built in). Create the first admin user with:
+```bash
+python -m fwanalyst_server.admin create-user <username> --role admin
+```
+
 ## Architecture
 
 ```

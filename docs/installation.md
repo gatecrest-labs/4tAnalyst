@@ -85,7 +85,41 @@ sudo -u 4tanalyst bash -c "HOME=/opt/4tanalyst UV_NO_CONFIG=1 /usr/local/bin/uv 
 
 You should see all 7 editable packages listed with their paths under `/opt/4tanalyst`, plus `fortigate-change-planner` (pulled in transitively as a git dependency of `fwanalyst_server`, not editable, no local path under `/opt/4tanalyst`).
 
-### 6. Configure credentials
+### 6. Create the first admin user
+
+Before starting the server in HTTP mode, create at least one web admin account:
+
+```bash
+sudo -u 4tanalyst python -m fwanalyst_server.admin create-user <username> --role admin
+# Password is prompted interactively and never logged
+```
+
+### 7. Add web_admin config to credentials.yaml
+
+Generate a secret key and add it to `credentials.yaml`:
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+```yaml
+web_admin:
+  secret_key: "<output from above>"
+  session_lifetime_hours: 8
+  analytics_retention_days: 90
+
+pricing:
+  claude-sonnet-5:
+    input_per_million: 3.00
+    output_per_million: 15.00
+  default:
+    input_per_million: 3.00
+    output_per_million: 15.00
+```
+
+The admin UI is then available at `http://<server>:8000/admin` once the server starts.
+
+### 8. Configure credentials
 
 ```bash
 sudo -u 4tanalyst bash -c "cd /opt/4tanalyst && cp credentials.yaml.example credentials.yaml"
@@ -93,7 +127,7 @@ sudo -u 4tanalyst bash -c "cd /opt/4tanalyst && cp credentials.yaml.example cred
 sudo -u 4tanalyst nano /opt/4tanalyst/credentials.yaml
 ```
 
-### 7. Start the servers
+### 9. Start the servers
 
 For initial testing, start the server manually. Host/port are set via
 `FASTMCP_HOST`/`FASTMCP_PORT` env vars, not CLI flags — the installed

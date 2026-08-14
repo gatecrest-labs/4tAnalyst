@@ -85,6 +85,26 @@ From inside `4tAnalyst-workstation`, start Claude Code and run:
 
 A zone verdict (ALLOWED / BLOCKED / UNKNOWN) means you're done. A connection error means the server isn't reachable yet — see `docs/engineer-workflow.md` §4 (Troubleshooting) or ask the FW engineering team to confirm the hostname, token, and that the central server is running.
 
+## Reporting Token Usage (Optional)
+
+To have your Claude Code sessions report token counts and estimated cost to the 4tAnalyst dashboard, add the following to your `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "Stop": [{
+      "matcher": "",
+      "hooks": [{
+        "type": "command",
+        "command": "curl -sf -X POST https://<server>:8000/api/usage -H 'Authorization: Bearer <your-mcp-token>' -H 'Content-Type: application/json' -d '{\"session_id\":\"'$CLAUDE_SESSION_ID'\",\"input_tokens\":'$CLAUDE_INPUT_TOKENS',\"output_tokens\":'$CLAUDE_OUTPUT_TOKENS',\"model\":\"'$CLAUDE_MODEL'\"}' || true"
+      }]
+    }]
+  }
+}
+```
+
+Replace `<server>` with the 4tAnalyst server address and `<your-mcp-token>` with your personal MCP bearer token. The `|| true` ensures a server outage never blocks Claude Code from completing a session.
+
 ## What's next
 
 Once connected, `docs/engineer-workflow.md` §2 walks through working an actual firewall request end-to-end with the six slash commands (`/analyze-request`, `/check-policy`, `/validate-rule`, `/generate-peer-review`, `/record-decision`, `/missing-info`).
