@@ -1,6 +1,8 @@
 import sqlite3
 import time
+
 import pytest
+
 from fwanalyst_server.analytics import AnalyticsDB
 
 

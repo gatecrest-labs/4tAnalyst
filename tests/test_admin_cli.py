@@ -1,6 +1,5 @@
 """Tests for fwanalyst_server.admin_cli user management functions."""
 
-import json
 from unittest.mock import patch
 
 import pytest

@@ -1,8 +1,9 @@
 import pytest
 from fastapi.testclient import TestClient
+
 from fwanalyst_server.admin_app import create_admin_app
-from fwanalyst_server.analytics import AnalyticsDB
 from fwanalyst_server.admin_auth import save_users
+from fwanalyst_server.analytics import AnalyticsDB
 
 
 @pytest.fixture

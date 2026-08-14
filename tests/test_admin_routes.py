@@ -1,11 +1,11 @@
 """Tests for admin web routes: login/logout, dashboard auth, role enforcement."""
 
-import json
 import pytest
 from fastapi.testclient import TestClient
+
 from fwanalyst_server.admin_app import create_admin_app
-from fwanalyst_server.analytics import AnalyticsDB
 from fwanalyst_server.admin_auth import hash_password, save_users
+from fwanalyst_server.analytics import AnalyticsDB
 
 
 @pytest.fixture

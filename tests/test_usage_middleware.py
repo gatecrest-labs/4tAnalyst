@@ -6,9 +6,9 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from fwanalyst_server.usage_middleware import UsageMiddleware
-from fwanalyst_server.analytics import AnalyticsDB
 from fwanalyst_server import context as ctx
+from fwanalyst_server.analytics import AnalyticsDB
+from fwanalyst_server.usage_middleware import UsageMiddleware
 
 
 async def mcp_app(scope, receive, send):

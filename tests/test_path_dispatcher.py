@@ -1,4 +1,5 @@
 import pytest
+
 from fwanalyst_server.path_dispatcher import PathDispatcher
 
 

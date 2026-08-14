@@ -4,18 +4,15 @@ import json
 import time
 
 import pytest
-from pathlib import Path
+
 from fwanalyst_server.admin_auth import (
-    hash_password,
-    verify_password,
-    load_users,
-    save_users,
     authenticate,
     check_rate_limit,
-    record_failure,
     clear_failures,
+    hash_password,
+    record_failure,
+    verify_password,
 )
-
 
 # ---------------------------------------------------------------------------
 # Test isolation: token_registry is a module-level singleton. Ensure any state

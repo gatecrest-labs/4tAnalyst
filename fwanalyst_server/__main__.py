@@ -18,6 +18,7 @@ from pathlib import Path
 import yaml
 from mcp.server.transport_security import TransportSecuritySettings
 
+from fwanalyst_server import analytics
 from fwanalyst_server.auth import require_bearer
 from fwanalyst_server.rate_limit import rate_limit
 from fwanalyst_server.request_timeout import request_timeout
