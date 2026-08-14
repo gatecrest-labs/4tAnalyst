@@ -66,9 +66,14 @@ class UsageMiddleware:
             if not replayed:
                 replayed = True
                 return {"type": "http.request", "body": body, "more_body": False}
-            # Downstream asked for more — return the last real message we got
-            # (usually http.disconnect or another http.request with empty body).
-            return last_msg
+            # If the body-reading loop was interrupted by a non-request event
+            # (e.g. http.disconnect arrived mid-body), return that stored event.
+            if last_msg.get("type") != "http.request":
+                return last_msg
+            # Body was fully received normally; proxy subsequent calls to the
+            # real receive() so the MCP transport gets the actual http.disconnect
+            # signal instead of looping on the replayed request forever.
+            return await receive()
 
         await self._app(scope, replay_receive, send)
 
