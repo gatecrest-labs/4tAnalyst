@@ -56,7 +56,7 @@ class UsageMiddleware:
                 more = False
 
         body = b"".join(chunks)
-        self._try_log(body)
+        self._try_log(body, scope)
 
         # Replay the consumed body to the downstream app.
         replayed = False
@@ -77,7 +77,7 @@ class UsageMiddleware:
 
         await self._app(scope, replay_receive, send)
 
-    def _try_log(self, body: bytes) -> None:
+    def _try_log(self, body: bytes, scope: dict) -> None:
         try:
             data = json.loads(body)
             if data.get("method") != "tools/call":
@@ -85,8 +85,10 @@ class UsageMiddleware:
             tool_name: str = data.get("params", {}).get("name", "unknown")
             adom: str | None = data.get("params", {}).get("arguments", {}).get("adom")
             token_label = token_label_var.get("-")
+            client = scope.get("client")
+            ip_address = client[0] if client else None
             db = self._db or analytics._db
             if db:
-                db.log_tool_call(token_label, tool_name, adom)
+                db.log_tool_call(token_label, tool_name, adom, ip_address)
         except Exception:
             pass

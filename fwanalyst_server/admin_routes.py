@@ -366,6 +366,7 @@ def create_router(
             else:
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
 
+        ip_address = request.client.host if request.client else None
         body = await request.json()
         input_tokens = int(body.get("input_tokens", 0))
         output_tokens = int(body.get("output_tokens", 0))
@@ -383,6 +384,7 @@ def create_router(
             output_tokens,
             model,
             cost,
+            ip_address,
         )
         return JSONResponse({}, status_code=204)
 

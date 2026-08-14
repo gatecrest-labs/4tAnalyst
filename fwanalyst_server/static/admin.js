@@ -11,7 +11,7 @@
   const charts = IDS.map((id, i) => new Chart(document.getElementById(id), {
     type: 'line',
     data: { labels: [], datasets: [{ label: LABELS[i], data: [], borderColor: COLORS[i], fill: false, pointRadius: 0, tension: 0.1 }] },
-    options: { responsive: true, animation: false, scales: { y: { min: 0, max: 100 } } }
+    options: { responsive: true, maintainAspectRatio: false, animation: false, scales: { y: { min: 0, max: 100 } } }
   }));
 
   async function load(range) {
@@ -45,7 +45,7 @@
   if (!document.getElementById('usage-chart')) return;
   const PALETTE = ['#1a3a5c', '#2a6099', '#4a90c4', '#7bb3d4', '#a8cee3'];
   const chart = new Chart(document.getElementById('usage-chart'), {
-    type: 'bar',
+    type: 'line',
     data: { labels: [], datasets: [] },
     options: { responsive: true, animation: false, plugins: { legend: { display: true } } }
   });
@@ -56,22 +56,24 @@
     const d = await r.json();
     const labels = d.buckets.map(b => new Date(b.ts * 1000).toLocaleString());
     if (view === 'calls') {
-      chart.config.type = 'bar';
+      chart.config.type = 'line';
       chart.data.labels = labels;
       chart.data.datasets = d.by_user.map((u, i) => ({
-        label: u.token_label,
+        label: u.display_label,
         data: d.buckets.map(b => (b.by_user && b.by_user[u.token_label]) ? b.by_user[u.token_label].tool_calls : 0),
-        backgroundColor: PALETTE[i % PALETTE.length]
+        borderColor: PALETTE[i % PALETTE.length],
+        backgroundColor: PALETTE[i % PALETTE.length],
+        fill: false, tension: 0.2, pointRadius: 3
       }));
-      chart.options.scales = { x: { stacked: true }, y: { stacked: true } };
+      chart.options.scales = {};
     } else if (view === 'tokens') {
-      chart.config.type = 'bar';
+      chart.config.type = 'line';
       chart.data.labels = labels;
       chart.data.datasets = [
-        { label: 'Input tokens', data: d.buckets.map(b => b.input_tokens || 0), backgroundColor: '#3498db' },
-        { label: 'Output tokens', data: d.buckets.map(b => b.output_tokens || 0), backgroundColor: '#e74c3c' }
+        { label: 'Input tokens', data: d.buckets.map(b => b.input_tokens || 0), borderColor: '#3498db', backgroundColor: '#3498db', fill: false, tension: 0.2, pointRadius: 3 },
+        { label: 'Output tokens', data: d.buckets.map(b => b.output_tokens || 0), borderColor: '#e74c3c', backgroundColor: '#e74c3c', fill: false, tension: 0.2, pointRadius: 3 }
       ];
-      chart.options.scales = { x: { stacked: false }, y: { stacked: false } };
+      chart.options.scales = {};
     } else {
       chart.config.type = 'line';
       chart.data.labels = labels;
@@ -80,7 +82,7 @@
     }
     chart.update();
     document.getElementById('summary-table').innerHTML = '<table><thead><tr><th>User</th><th>Tool Calls</th><th>Input Tokens</th><th>Output Tokens</th><th>Est. Cost</th></tr></thead><tbody>' +
-      d.by_user.map(u => `<tr><td>${u.token_label}</td><td>${u.tool_calls}</td><td>${u.input_tokens.toLocaleString()}</td><td>${u.output_tokens.toLocaleString()}</td><td>$${u.estimated_cost.toFixed(4)}</td></tr>`).join('') +
+      d.by_user.map(u => `<tr><td>${u.display_label}</td><td>${u.tool_calls}</td><td>${u.input_tokens.toLocaleString()}</td><td>${u.output_tokens.toLocaleString()}</td><td>$${u.estimated_cost.toFixed(4)}</td></tr>`).join('') +
       '</tbody></table>';
   }
 

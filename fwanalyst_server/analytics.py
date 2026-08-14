@@ -50,6 +50,11 @@ class AnalyticsDB:
         with sqlite3.connect(self._db_path) as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(_SCHEMA)
+            for tbl in ("tool_calls", "usage_events"):
+                try:
+                    conn.execute(f"ALTER TABLE {tbl} ADD COLUMN ip_address TEXT")
+                except sqlite3.OperationalError:
+                    pass
 
     def _writer_loop(self) -> None:
         while True:
@@ -69,10 +74,10 @@ class AnalyticsDB:
     def _enqueue(self, sql: str, params: tuple[Any, ...]) -> None:
         self._queue.put((sql, params))
 
-    def log_tool_call(self, token_label: str, tool_name: str, adom: str | None) -> None:
+    def log_tool_call(self, token_label: str, tool_name: str, adom: str | None, ip_address: str | None = None) -> None:
         self._enqueue(
-            "INSERT INTO tool_calls (ts, token_label, tool_name, adom) VALUES (?,?,?,?)",
-            (int(time.time()), token_label, tool_name, adom),
+            "INSERT INTO tool_calls (ts, token_label, tool_name, adom, ip_address) VALUES (?,?,?,?,?)",
+            (int(time.time()), token_label, tool_name, adom, ip_address),
         )
 
     def log_usage_event(
@@ -83,12 +88,13 @@ class AnalyticsDB:
         output_tokens: int,
         model: str | None,
         estimated_cost: float,
+        ip_address: str | None = None,
     ) -> None:
         self._enqueue(
             "INSERT INTO usage_events "
-            "(ts, token_label, session_id, input_tokens, output_tokens, model, estimated_cost) "
-            "VALUES (?,?,?,?,?,?,?)",
-            (int(time.time()), token_label, session_id, input_tokens, output_tokens, model, estimated_cost),
+            "(ts, token_label, session_id, input_tokens, output_tokens, model, estimated_cost, ip_address) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (int(time.time()), token_label, session_id, input_tokens, output_tokens, model, estimated_cost, ip_address),
         )
 
     def log_system_metric(self, cpu_pct: float, mem_pct: float, disk_pct: float) -> None:
@@ -166,6 +172,15 @@ class AnalyticsDB:
                 "FROM usage_events WHERE ts >= ? ORDER BY ts",
                 (since,),
             ).fetchall()
+            ip_rows = conn.execute(
+                "SELECT token_label, ip_address FROM tool_calls "
+                "WHERE ip_address IS NOT NULL ORDER BY ts DESC"
+            ).fetchall()
+
+        ip_map: dict[str, str] = {}
+        for row in ip_rows:
+            if row["token_label"] not in ip_map:
+                ip_map[row["token_label"]] = row["ip_address"]
 
         buckets: dict[int, dict] = {}
         users: set[str] = set()
@@ -211,8 +226,10 @@ class AnalyticsDB:
 
         by_user: list[dict] = []
         for label in sorted(users):
+            ip = ip_map.get(label, "")
             totals: dict = {
                 "token_label": label,
+                "display_label": f"{label} ({ip})" if ip else label,
                 "tool_calls": 0,
                 "input_tokens": 0,
                 "output_tokens": 0,
@@ -248,9 +265,9 @@ def init(db_path: str) -> AnalyticsDB:
     return _db
 
 
-def log_tool_call(token_label: str, tool_name: str, adom: str | None) -> None:
+def log_tool_call(token_label: str, tool_name: str, adom: str | None, ip_address: str | None = None) -> None:
     if _db:
-        _db.log_tool_call(token_label, tool_name, adom)
+        _db.log_tool_call(token_label, tool_name, adom, ip_address)
 
 
 def log_usage_event(
@@ -260,9 +277,10 @@ def log_usage_event(
     output_tokens: int,
     model: str | None,
     estimated_cost: float,
+    ip_address: str | None = None,
 ) -> None:
     if _db:
-        _db.log_usage_event(token_label, session_id, input_tokens, output_tokens, model, estimated_cost)
+        _db.log_usage_event(token_label, session_id, input_tokens, output_tokens, model, estimated_cost, ip_address)
 
 
 def log_system_metric(cpu_pct: float, mem_pct: float, disk_pct: float) -> None:
