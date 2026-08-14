@@ -4,6 +4,68 @@ All notable changes to this project are documented here.
 
 ---
 
+## [Unreleased] — 2026-08-14
+
+### Added
+
+#### Web admin UI (`fwanalyst_server/admin_app.py`, `fwanalyst_server/admin_auth.py`, `fwanalyst_server/admin_cli.py`)
+
+Full browser-based administration interface at `/admin`, served alongside the MCP endpoint on the same port:
+
+- **Login/logout** — session-based auth with bcrypt password hashing, configurable session lifetime (`web_admin.session_lifetime_hours` in `credentials.yaml`).
+- **Dashboard** — system health (CPU, memory, disk), server uptime, active MCP sessions, and token usage summary.
+- **Token usage analytics** — per-engineer tool call counts and estimated cost, bucketed by time range (1h / 24h / 7d / 30d). Powered by `analytics.db`.
+- **ADOM management** — list configured ADOMs and their assigned engineer tokens.
+- **User management** — admin can create/delete web admin accounts and assign roles (`admin` / `viewer`).
+- Role enforcement: `viewer` role has read-only access; `admin` role can modify users and configuration.
+
+CLI for user management (`python -m fwanalyst_server.admin create-user <username> --role admin|viewer`).
+
+#### Analytics and usage tracking (`fwanalyst_server/analytics.py`, `fwanalyst_server/usage_middleware.py`)
+
+- `analytics.py` — async-safe SQLite backend (WAL mode, background writer thread). Tables: `tool_calls`, `usage_events`, `system_metrics`. Retention configurable via `web_admin.analytics_retention_days` (default 90 days); daily purge job runs as a daemon thread.
+- `UsageMiddleware` — ASGI middleware that eagerly reads the request body, logs `tools/call` invocations to `analytics.db` (tool name, ADOM, token label), then replays the body to the downstream app.
+- `_start_metrics_collector()` in `__main__.py` — daemon thread collecting CPU/memory/disk every 60 seconds via `psutil`.
+
+#### URL path dispatcher (`fwanalyst_server/path_dispatcher.py`)
+
+`PathDispatcher` ASGI app: routes `/admin` and `/api` prefixes to the FastAPI admin app and all other paths (including `/mcp`) to the MCP ASGI stack. Enables both the MCP server and admin UI to share a single port and TLS termination point.
+
+#### Hot-reload token registry (`fwanalyst_server/context.py`)
+
+`TokenRegistry` — thread-safe, hot-reloadable store for `server.tokens` entries. `token_registry.load(creds)` replaces the in-memory token list without a server restart. `get_tokens()` returns `None` before first load (signals auth.py to fall back to the static creds dict), enabling zero-downtime token additions.
+
+### Fixed
+
+#### `UsageMiddleware.replay_receive()` blocks asyncio event loop after first MCP connection (`fwanalyst_server/usage_middleware.py`)
+
+After replaying the request body, `replay_receive()` was returning `last_msg` (an `http.request` dict) on every subsequent call. The MCP streamable-HTTP transport calls `receive()` in a loop waiting for `http.disconnect`; it never arrived, the coroutine looped forever, and the entire asyncio event loop blocked — making all subsequent connections time out with HTTP 000.
+
+Fix: after body replay, check `last_msg.get("type")` — if it is not `"http.request"` (i.e. a disconnect event was already consumed during body reading), return it directly; otherwise proxy subsequent `receive()` calls through to the real `receive` so the transport gets the actual `http.disconnect` signal.
+
+### Changed
+
+#### Unified server startup (`fwanalyst_server/__main__.py`)
+
+- Analytics DB initialised at startup; path controlled by `DATA_DIR` env var (default `<repo>/data/analytics.db`).
+- Token registry loaded from `credentials.yaml` at startup for hot-reload support.
+- Admin web app (`create_admin_app`) conditionally mounted when `web_admin.secret_key` is present in `credentials.yaml`; gracefully disabled (with a startup warning) when the key is absent — MCP continues to serve normally.
+- `PathDispatcher` wires admin and MCP apps to the same port when admin is enabled.
+- `_start_retention_job()` daemon thread added alongside the existing metrics collector.
+- New dependencies: `fastapi>=0.111`, `python-multipart>=0.0.9`, `psutil>=6.0`, `bcrypt>=4.0`, `itsdangerous>=2.0`, `jinja2>=3.0`.
+
+### Tests
+
+- `tests/test_admin_auth.py` — bcrypt hash/verify, `load_users`/`save_users`, `authenticate`, rate limiting, `clear_failures`.
+- `tests/test_admin_cli.py` — CLI `create-user` and `delete-user` commands.
+- `tests/test_admin_routes.py` — login/logout flow, dashboard auth, role enforcement (`admin` vs `viewer`).
+- `tests/test_analytics.py` — `AnalyticsDB` schema, write/query, bucket aggregation, retention purge.
+- `tests/test_path_dispatcher.py` — prefix routing to correct downstream app.
+- `tests/test_usage_endpoint.py` — `/api/usage` response shape and auth.
+- `tests/test_usage_middleware.py` — tool call logging, non-tool-call passthrough, non-HTTP scope passthrough.
+
+---
+
 ## [Unreleased] — 2026-08-09
 
 ### Added
