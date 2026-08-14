@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title_suffix %} - Usage Graph{% endblock %}
+{% block content %}
+<h2>Usage Analytics</h2>
+<div class="range-selector" id="graph-ranges">
+  <button class="range-btn active" data-range="3600">1h</button>
+  <button class="range-btn" data-range="14400">4h</button>
+  <button class="range-btn" data-range="43200">12h</button>
+  <button class="range-btn" data-range="86400">1d</button>
+  <button class="range-btn" data-range="604800">7d</button>
+  <button class="range-btn" data-range="1209600">14d</button>
+  <input type="date" id="custom-start">-<input type="date" id="custom-end">
+  <button id="custom-apply">Apply</button>
+</div>
+<div class="view-selector">
+  <button class="view-btn active" data-view="calls">Tool Calls</button>
+  <button class="view-btn" data-view="tokens">Tokens</button>
+  <button class="view-btn" data-view="cost">Cost ($)</button>
+</div>
+<div class="chart-wrap"><canvas id="usage-chart"></canvas></div>
+<div id="summary-table"></div>
+{% endblock %}

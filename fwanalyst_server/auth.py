@@ -10,7 +10,7 @@ from __future__ import annotations
 import hmac
 import json
 
-from fwanalyst_server.context import allowed_adoms_var, token_label_var
+from fwanalyst_server.context import allowed_adoms_var, token_label_var, token_registry
 
 
 class AuthConfigError(ValueError):
@@ -27,11 +27,18 @@ def _resolve_allowed_adoms(token: str, creds: dict) -> set[str] | None:
 
     When adom_restriction: false, recognized named tokens still get {"*"} (ADOM
     filter lifted), but unrecognized tokens return None — auth always enforced.
+
+    Additive: checks token_registry first (if loaded), falls back to static creds
+    lookup only when the registry has not yet been initialised (returns None).
     """
     server_cfg = creds.get("server", {})
     restriction_enabled = server_cfg.get("adom_restriction", True)
 
-    for entry in server_cfg.get("tokens", []):
+    # Hot-reloadable registry takes precedence when it has been loaded.
+    live_tokens = token_registry.get_tokens()
+    token_source = live_tokens if live_tokens is not None else server_cfg.get("tokens", [])
+
+    for entry in token_source:
         if hmac.compare_digest(
             token.encode(), entry.get("token", "").encode()
         ):

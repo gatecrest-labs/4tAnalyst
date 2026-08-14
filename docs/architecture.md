@@ -21,16 +21,29 @@ Engineer Laptop                           Engineer terminal (no LLM path)
       │ MCP streamable-HTTP + bearer token      │
       ▼ (port 8000, path /mcp)                  │
 fwanalyst_server (single process) ──────────────┤
-  ├── plan_change ─────────▶ fgplanner  ◀───────┘  (external dependency)
-  │                            ├──▶ 4THealth external API (zone verdicts)
-  │                            ├──▶ FortiManager JSON-RPC (7.4/7.6)
-  │                            └──▶ standards YAML + render_report
-  ├── standards tools   ──▶ local files only (naming, approvals — NOT verdicts)
-  ├── fortimanager tools ──▶ FortiManager API (read-only queries)
-  ├── feedback tools     ──▶ SQLite / Postgres (audit trail, decisions)
-  ├── intake tools       ──▶ local .xlsx parser
-  └── zone tools         ──▶ 4THealth external API (ad-hoc lookups)
+  │                                             │
+  ├── PathDispatcher (port 8000)
+  │     ├── /admin, /api  ──▶  Admin Web UI (FastAPI)
+  │     │                        ├── Dashboard (psutil metrics)
+  │     │                        ├── Usage Graph (analytics.db)
+  │     │                        └── ADOM / User Management
+  │     └── /mcp  ──▶  MCP middleware stack
+  │                      ├── plan_change ──▶ fgplanner  ◀──────────────┘
+  │                      │                    ├──▶ 4THealth external API
+  │                      │                    ├──▶ FortiManager JSON-RPC
+  │                      │                    └──▶ standards YAML + render_report
+  │                      ├── standards tools  ──▶ local files
+  │                      ├── fortimanager tools ──▶ FortiManager API
+  │                      └── feedback tools   ──▶ SQLite
+  │
+  └── analytics.db (tool calls, token usage, system metrics)
 ```
+
+### Web admin layer
+
+The `PathDispatcher` middleware inspects the URL path on every incoming request before the bearer auth stack is evaluated. Requests to `/admin/*` and `/api/*` are routed to the FastAPI admin app (session-cookie auth, local accounts). Everything else reaches the existing MCP bearer-auth stack unchanged. The two auth models never interact.
+
+`UsageMiddleware` sits inside the bearer-auth stack and logs every `tools/call` invocation to `analytics.db` automatically — zero client configuration needed. Engineers can optionally enrich these records with actual token counts by adding a one-line Claude Code `Stop` hook (see `docs/workstation-onboarding.md`).
 
 **Firewall credentials live only on the central server.** Engineers never need direct API access to FortiManager. The per-domain packages still exist as code in this repo (and run individually over stdio for development), but production serves one authenticated endpoint instead of several unauthenticated SSE ports.
 

@@ -13,6 +13,8 @@ services:
       - 8000:8000
     volumes:
       - ./:/opt/4tanalyst:cached
+      - ./data:/app/data
+      - ./credentials.yaml:/app/credentials.yaml:ro
 
 # Note: the container mounts the repo so local edits are visible; for CI use
 # docker-compose.ci.yml (built image, no mounts). The per-package servers can

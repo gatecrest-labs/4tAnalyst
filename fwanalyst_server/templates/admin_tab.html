@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title_suffix %} - Admin{% endblock %}
+{% block content %}
+<h2>User Management</h2>
+<table><thead><tr><th>Username</th><th>Role</th><th>Created</th><th>Actions</th></tr></thead>
+<tbody id="users-tbody"></tbody></table>
+<button id="add-user-btn">Add User</button>
+<h2>ADOM &amp; Token Management</h2>
+<table><thead><tr><th>Label</th><th>Token</th><th>Allowed ADOMs</th><th>Actions</th></tr></thead>
+<tbody id="tokens-tbody"></tbody></table>
+{% endblock %}
