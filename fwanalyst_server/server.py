@@ -221,6 +221,73 @@ mcp.add_tool(_logged(plan_change), annotations=ToolAnnotations(readOnlyHint=True
 
 
 # ---------------------------------------------------------------------------
+# plan_fqdn_change — the FQDN allowlist planner
+# ---------------------------------------------------------------------------
+
+def plan_fqdn_change(
+    src_ip: str,
+    vendor: str,
+    category: str,
+    ticket_id: str,
+    firewalls: list[str],
+    entries: list[dict],
+) -> dict:
+    """
+    Compute a deterministic FQDN allowlist change plan.
+
+    Use this tool for requests where destinations are FQDNs or wildcard domains
+    (e.g. *.push.apple.com) rather than IP addresses. plan_change will reject
+    such inputs — use plan_fqdn_change instead.
+
+    Parameters
+    ----------
+    src_ip      : Source IP/CIDR, 'any'/'all', or a FortiGate address object name
+    vendor      : Vendor name (e.g. "Apple") — used in address group naming
+    category    : Vendor category (e.g. "APNs") — used in address group naming
+    ticket_id   : Change ticket ID (e.g. CHG0012345)
+    firewalls   : Target firewalls as "DEVICE:ADOM" strings
+    entries     : List of FQDNEntry dicts with keys: fqdn, is_wildcard, ports,
+                  protocol, required, comment. Use parse_fqdn_allowlist first
+                  to produce these from a spreadsheet or conversation.
+
+    Returns the FQDN change plan payload for render_report.py / display.
+    Check per_firewall[*].warnings for degraded-data notices.
+    """
+    from intake_mcp.fqdn_parser import FQDNAllowlistRequest, FQDNEntry
+    from planner.engine import plan_fqdn_change as _plan
+    from planner.engine import to_fqdn_report_payload
+    from planner.models import PlannerDataError
+
+    try:
+        parsed_entries = [
+            FQDNEntry(
+                fqdn=e["fqdn"],
+                is_wildcard=e.get("is_wildcard", e["fqdn"].startswith("*.")),
+                ports=[int(p) for p in e.get("ports", [443])],
+                protocol=e.get("protocol", "TCP"),
+                required=bool(e.get("required", True)),
+                comment=e.get("comment", ""),
+            )
+            for e in entries
+        ]
+        request = FQDNAllowlistRequest(
+            vendor=vendor, category=category, src_ip=src_ip,
+            ticket_id=ticket_id, firewalls=firewalls, entries=parsed_entries,
+        )
+        plan = _plan(request)
+        payload = to_fqdn_report_payload(plan)
+        payload["warnings"] = [w for fw in plan.per_firewall for w in fw.warnings]
+        return payload
+    except PlannerDataError as exc:
+        return {"error": str(exc), "error_source": exc.source}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+
+mcp.add_tool(_logged(plan_fqdn_change), annotations=ToolAnnotations(readOnlyHint=True))
+
+
+# ---------------------------------------------------------------------------
 # Aggregate the per-package tools
 # ---------------------------------------------------------------------------
 
@@ -265,6 +332,7 @@ def _register_existing_tools() -> None:
         fmg.get_device_client_location,
         fmg.get_device_sdwan,
         fmg.get_device_sdwan_monitor,
+        fmg.search_fqdn_rules,
         # feedback / audit
         feedback.record_feedback,
         feedback.get_similar_cases,
@@ -275,6 +343,7 @@ def _register_existing_tools() -> None:
         intake.parse_spreadsheet_file,
         intake.parse_manual_entry_tool,
         intake.describe_template,
+        intake.parse_fqdn_allowlist,
         # zone (live 4THealth — authoritative verdicts)
         zone.query_zone_policy,
         zone.get_zones,
