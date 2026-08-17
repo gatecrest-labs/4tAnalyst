@@ -1228,6 +1228,7 @@ def _plan_fqdn_firewall(
     )
     fw.proposed_policy = {
         "name": policy_name_str,
+        "package": snapshot.packages[0] if snapshot.packages else "",
         "srcintf": srcintf or "any",
         "dstintf": dstintf or "any",
         "srcaddr": [src_obj.name],

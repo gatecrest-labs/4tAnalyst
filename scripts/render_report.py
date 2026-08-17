@@ -677,7 +677,7 @@ def render_fqdn_html(
   </table>''' if obj_rows else ''}
 
   {f'<h3>Proposed Group: <code>{esc(grp.get("name",""))}</code></h3><p>Members: {esc(", ".join(grp.get("members",[])))}</p>' if grp else ''}
-  {f'<h3>Proposed Policy: <code>{esc(pol.get("name",""))}</code></h3>' if pol else ''}
+  {f'<h3>Proposed Policy: <code>{esc(pol.get("name",""))}</code></h3><p><strong>Package:</strong> <code>{esc(pol.get("package",""))}</code></p>' if pol else ''}
 </section>""")
 
     meta_line = _render_meta_line(generated_at, model, cost_usd)
