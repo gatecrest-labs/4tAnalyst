@@ -18,8 +18,10 @@ from typing import Any
 from fortimanager_mcp.client import FortiManagerAPIError, FortiManagerClient
 from fortimanager_mcp.matching import (
     AddressCatalog,
+    FQDNCatalog,
     PolicyMatcher,
     ServiceCatalog,
+    _names,
     parse_service_request,
 )
 from fortimanager_mcp.zone_map import (
@@ -320,6 +322,123 @@ def build_catalogs(
             _catalog_inflight.pop(key, None)
         event.set()
         raise
+
+
+def build_fqdn_catalog(client: FortiManagerClient, adom: str) -> FQDNCatalog:
+    """Build a FQDNCatalog from ADOM address objects and groups.
+
+    Re-fetches the same objects as build_catalogs. No separate caching —
+    FortiManager reads are fast and the catalog cache in build_catalogs covers
+    the expensive path.
+    """
+    objects = [o for o in client.get_address_objects(adom) if isinstance(o, dict)]
+    groups = [g for g in client.get_address_groups(adom) if isinstance(g, dict)]
+    return FQDNCatalog(objects, groups)
+
+
+def search_fqdn_rules(
+    client: FortiManagerClient,
+    adom: str,
+    device: str,
+    fqdns: list[str],
+) -> dict[str, Any]:
+    """Find FortiManager policies that cover any of the requested FQDNs.
+
+    Resolves destination address objects/groups using FQDNCatalog (exact string
+    match). Returns per-FQDN coverage status and a partial_group_match hint
+    when some FQDNs are covered and others are not (candidate for group-append).
+    """
+    result: dict[str, Any] = {
+        "results": [],
+        "partial_group_match": None,
+        "degraded": False,
+        "packages_searched": [],
+        "packages_failed": [],
+    }
+
+    try:
+        fqdn_catalog = build_fqdn_catalog(client, adom)
+        packages = client.get_policy_packages(adom)
+    except Exception as exc:
+        message, code = safe_error(exc)
+        result["degraded"] = True
+        result["error"] = message
+        result["error_code"] = code
+        return result
+
+    device_pkgs = [
+        p for p in packages
+        if isinstance(p, dict) and _package_targets_device(p, device)
+    ]
+
+    coverage: dict[str, dict] = {
+        f: {"fqdn": f, "covered": False, "address_object_name": None,
+            "via_group": None, "rule_id": None, "rule_name": None,
+            "rule_enabled": False}
+        for f in fqdns
+    }
+
+    for pkg in device_pkgs:
+        pkg_name = pkg.get("name", "")
+        try:
+            policies = client.get_policies(adom, pkg_name)
+        except FortiManagerAPIError as exc:
+            message, code = safe_error(exc)
+            result["packages_failed"].append(
+                {"package": pkg_name, "error": message, "error_code": code}
+            )
+            result["degraded"] = True
+            continue
+
+        result["packages_searched"].append(pkg_name)
+
+        for pol in policies:
+            if not isinstance(pol, dict):
+                continue
+            pol_enabled = pol.get("status", "enable") != "disable"
+            dst_names = _names(pol.get("dstaddr", []))
+
+            pol_fqdns: set[str] = set()
+            dst_group_for: dict[str, str] = {}  # fqdn_str → first containing group name
+
+            for dst_name in dst_names:
+                fqdn_set = fqdn_catalog.fqdns_for_ref(dst_name)
+                if fqdn_set:
+                    for f in fqdn_set:
+                        pol_fqdns.add(f)
+                        if fqdn_catalog._groups.get(dst_name) and f not in dst_group_for:
+                            dst_group_for[f] = dst_name
+
+            for fqdn_str in fqdns:
+                if fqdn_str in pol_fqdns and not coverage[fqdn_str]["covered"]:
+                    coverage[fqdn_str].update({
+                        "covered": True,
+                        "address_object_name": fqdn_catalog.exact_match_name(fqdn_str),
+                        "via_group": dst_group_for.get(fqdn_str),
+                        "rule_id": pol.get("policyid"),
+                        "rule_name": pol.get("name", ""),
+                        "rule_enabled": pol_enabled,
+                    })
+
+    result["results"] = list(coverage.values())
+
+    covered_fqdns = [f for f in fqdns if coverage[f]["covered"]]
+    uncovered_fqdns = [f for f in fqdns if not coverage[f]["covered"]]
+
+    if covered_fqdns and uncovered_fqdns:
+        candidate_groups: set[str] | None = None
+        for cf in covered_fqdns:
+            g = fqdn_catalog.groups_containing_fqdn(cf)
+            candidate_groups = g if candidate_groups is None else candidate_groups & g
+        if candidate_groups:
+            result["partial_group_match"] = {
+                "group_name": next(iter(sorted(candidate_groups))),
+                "covered": covered_fqdns,
+                "uncovered": uncovered_fqdns,
+            }
+
+    result["results"].sort(key=lambda r: r["fqdn"])
+    return result
 
 
 def build_policy_snapshot(

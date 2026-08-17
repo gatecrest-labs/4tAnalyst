@@ -10,8 +10,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from planner.cli_gen import (
     address_object_cli,
     exception_comment,
+    fqdn_address_object_cli,
     policy_cli,
     service_object_cli,
+    wildcard_fqdn_address_object_cli,
 )
 
 
@@ -138,3 +140,34 @@ def test_addrgrp_create_cli_exact():
         '    next\n'
         'end'
     )
+
+
+def test_fqdn_address_object_cli():
+    result = fqdn_address_object_cli(
+        "FQDN-axm-adm-scep.apple.com",
+        "axm-adm-scep.apple.com",
+        "Apple SCEP - <TICKET_ID>",
+    )
+    assert 'set type fqdn' in result
+    assert 'set fqdn "axm-adm-scep.apple.com"' in result
+    assert 'edit "FQDN-axm-adm-scep.apple.com"' in result
+    assert 'set comment "Apple SCEP - <TICKET_ID>"' in result
+    assert result.startswith("config firewall address")
+    assert result.strip().endswith("end")
+
+
+def test_wildcard_fqdn_address_object_cli():
+    result = wildcard_fqdn_address_object_cli(
+        "WFQDN-push.apple.com",
+        "*.push.apple.com",
+        "APNs - <TICKET_ID>",
+    )
+    assert 'set type wildcard-fqdn' in result
+    assert 'set wildcard-fqdn "*.push.apple.com"' in result
+    assert 'edit "WFQDN-push.apple.com"' in result
+    assert result.startswith("config firewall address")
+
+
+def test_fqdn_object_cli_no_comment():
+    result = fqdn_address_object_cli("FQDN-example.com", "example.com", "")
+    assert "set comment" not in result

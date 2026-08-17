@@ -97,3 +97,51 @@ def test_get_adoms_wildcard_returns_all(monkeypatch):
         assert len(result) == 2
     finally:
         allowed_adoms_var.reset(token)
+
+
+def test_search_fqdn_rules_enforces_adom_guard(monkeypatch):
+    """search_fqdn_rules must reject tokens that are not allowed for the ADOM."""
+    from fortimanager_mcp import server as fmg_server
+
+    # Restrict to OT-ADOM only
+    token = allowed_adoms_var.set({"OT-ADOM"})
+    try:
+        result = fmg_server.search_fqdn_rules(
+            adom="IT-ADOM", device="FW1", fqdns=["*.example.com"]
+        )
+    finally:
+        allowed_adoms_var.reset(token)
+
+    assert "error" in result
+    assert "IT-ADOM" in result["error"]
+    assert result.get("error_code") == "forbidden"
+
+
+def test_search_fqdn_rules_permitted_adom(monkeypatch):
+    """search_fqdn_rules passes through when the token allows the ADOM."""
+    from fortimanager_mcp import query as _query
+    from fortimanager_mcp import server as fmg_server
+
+    class _FakeClient:
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+
+    monkeypatch.setattr(fmg_server, "_fortimanager_client", lambda: _FakeClient())
+    # Return a minimal valid result from search_fqdn_rules
+    monkeypatch.setattr(
+        _query, "search_fqdn_rules",
+        lambda client, adom, device, fqdns: {
+            "results": [], "degraded": False, "partial_group_match": None
+        },
+    )
+
+    token = allowed_adoms_var.set({"OT-ADOM"})
+    try:
+        result = fmg_server.search_fqdn_rules(
+            adom="OT-ADOM", device="FW1", fqdns=["*.example.com"]
+        )
+    finally:
+        allowed_adoms_var.reset(token)
+
+    assert "error" not in result
+    assert result["degraded"] is False

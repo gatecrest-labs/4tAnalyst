@@ -135,3 +135,43 @@ class ChangePlan:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass
+class FQDNAddressObject:
+    name: str         # e.g. "WFQDN-push.apple.com"
+    obj_type: str     # "fqdn" | "wildcard-fqdn"
+    value: str        # e.g. "*.push.apple.com"
+    comment: str
+    cli: str = ""
+
+
+@dataclass
+class FQDNAddrGroup:
+    name: str           # "GRP-Apple-APNs-DST"
+    members: list[str]  # object names
+    comment: str
+    cli: str = ""
+
+
+@dataclass
+class FQDNFirewallPlan:
+    firewall: str
+    adom: str
+    verdict: str     # "blocked_exception" | "already_covered" | "new_rule" | "unknown_no_action" | "error"
+    src_zone: str
+    coverage: str    # "already_covered" | "partial_coverage" | "new_rule" | "n/a"
+    covered_entries: list    # list of FQDNEntry objects from intake_mcp
+    uncovered_entries: list  # list of FQDNEntry objects
+    proposed_objects: list   # list[FQDNAddressObject]
+    proposed_group: FQDNAddrGroup | None
+    proposed_policy: dict | None
+    group_append_alternative: GroupAppendAlternative | None
+    degraded: bool
+    warnings: list[str]
+
+
+@dataclass
+class FQDNChangePlan:
+    request: Any     # FQDNAllowlistRequest from intake_mcp
+    per_firewall: list[FQDNFirewallPlan]

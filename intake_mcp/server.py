@@ -34,6 +34,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
+from intake_mcp.fqdn_parser import parse_fqdn_rows, parse_fqdn_xlsx
 from intake_mcp.parser import parse_manual_entry, parse_spreadsheet
 
 logger = logging.getLogger(__name__)
@@ -294,6 +295,49 @@ def describe_template() -> dict[str, Any]:
             "vpn_config": None,
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Tool: parse_fqdn_allowlist
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def parse_fqdn_allowlist(
+    src_ip: str,
+    ticket_id: str,
+    firewalls: list[str],
+    rows: list[dict] | None = None,
+    file_path: str = "",
+) -> dict:
+    """
+    Parse a vendor URL allowlist into a normalised FQDNAllowlistRequest.
+
+    Accepts either a list of row dicts (for conversational entry) or a path
+    to an .xlsx file. The table must have columns: Hostname/Domain, Port(s),
+    Protocol, Direction, Vendor, Category, Required?, Purpose/Notes.
+
+    Parameters
+    ----------
+    src_ip      : Source IP or CIDR (the internal host/network that needs access)
+    ticket_id   : Change ticket ID (e.g. CHG0012345)
+    firewalls   : Target firewalls as "DEVICE:ADOM" strings
+    rows        : List of row dicts (use when engineer pastes table in conversation)
+    file_path   : Path to .xlsx file (use when engineer provides a file)
+
+    Returns FQDNAllowlistRequest with entries, warnings, and missing_fields.
+    Always check missing_fields and warnings before calling plan_fqdn_change.
+    """
+    import dataclasses
+    try:
+        if file_path:
+            req = parse_fqdn_xlsx(file_path, src_ip=src_ip, ticket_id=ticket_id,
+                                  firewalls=firewalls)
+        else:
+            req = parse_fqdn_rows(rows or [], src_ip=src_ip, ticket_id=ticket_id,
+                                  firewalls=firewalls)
+        return dataclasses.asdict(req)
+    except Exception as exc:
+        return {"error": str(exc)}
 
 
 # ---------------------------------------------------------------------------

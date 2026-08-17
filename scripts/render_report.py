@@ -53,6 +53,21 @@ def validate_payload(data: dict) -> None:
         raise PayloadError("payload['cli']['per_firewall'] must be a list")
 
 
+FQDN_REQUIRED_KEYS = {"plan_type", "vendor", "category", "src_ip", "per_firewall"}
+
+
+def validate_fqdn_payload(data: dict) -> None:
+    if not isinstance(data, dict):
+        raise PayloadError("FQDN payload must be a JSON object")
+    if data.get("plan_type") != "fqdn_allowlist":
+        raise PayloadError("payload['plan_type'] must be 'fqdn_allowlist'")
+    missing = FQDN_REQUIRED_KEYS - data.keys()
+    if missing:
+        raise PayloadError(f"FQDN payload missing required keys: {sorted(missing)}")
+    if not isinstance(data["per_firewall"], list):
+        raise PayloadError("payload['per_firewall'] must be a list")
+
+
 def output_dir_name(data: dict) -> str:
     ticket_id = data.get("ticket_id")
     if ticket_id:
@@ -142,6 +157,95 @@ def render_conf(data: dict) -> str:
             elif alt.get("direct_cli"):
                 parts.append(alt["direct_cli"].replace("<TICKET_ID>", ticket))
                 parts.append("")
+    return "\n".join(parts)
+
+
+def render_fqdn_conf(data: dict) -> str:
+    """Render FQDN allowlist plan as a FortiGate CLI implementation script."""
+    ticket = data.get("ticket_id") or "<TICKET_ID>"
+    parts: list[str] = []
+
+    for fw in data.get("per_firewall", []):
+        verdict = fw.get("verdict", "")
+        parts.append(f"# {'=' * 77}")
+        parts.append(f"# Firewall: {fw.get('firewall', '')} (ADOM: {fw.get('adom', '')})")
+        parts.append(f"# Verdict:  {verdict}  |  Coverage: {fw.get('coverage', '')}")
+        parts.append(f"# Source zone: {fw.get('src_zone', '')}  →  Internet (FQDN destination)")
+        parts.append(f"# {'=' * 77}")
+        parts.append("")
+
+        for w in fw.get("warnings", []):
+            parts.append(f"# WARNING: {w}")
+        if fw.get("warnings"):
+            parts.append("")
+
+        if verdict == "already_covered":
+            parts.append("# STATUS: already_covered — no CLI changes required.")
+            parts.append("# All requested FQDNs are covered by existing rules.")
+            parts.append("")
+            continue
+
+        if verdict == "unknown_no_action":
+            parts.append("# STATUS: unknown_no_action — zone verdict could not be determined.")
+            parts.append("# No CLI generated. Verify the source IP zone and re-run.")
+            parts.append("")
+            continue
+
+        if verdict == "blocked_exception":
+            parts.append(
+                "# STATUS: blocked_exception — source zone is BLOCKED from Internet by policy.\n"
+                "# The CLI below implements an EXCEPTION. Do not push until approved.\n"
+            )
+
+        # Coverage summary
+        uncovered = fw.get("uncovered_entries", [])
+        covered = fw.get("covered_entries", [])
+        if covered:
+            parts.append(f"# Already covered ({len(covered)} entries):")
+            for e in covered:
+                parts.append(f"#   {e['fqdn']}  ports={e['ports']}  protocol={e['protocol']}")
+            parts.append("")
+        if uncovered:
+            parts.append(f"# New entries to implement ({len(uncovered)}):")
+            for e in uncovered:
+                parts.append(f"#   {e['fqdn']}  ports={e['ports']}  protocol={e['protocol']}")
+            parts.append("")
+
+        # Proposed address objects
+        for obj in fw.get("proposed_objects", []):
+            cli = obj.get("cli", "")
+            if cli:
+                parts.append(cli.replace("<TICKET_ID>", ticket))
+                parts.append("")
+
+        # Proposed group
+        grp = fw.get("proposed_group")
+        if grp and grp.get("cli"):
+            parts.append(grp["cli"].replace("<TICKET_ID>", ticket))
+            parts.append("")
+
+        # Source / service objects + policy
+        pol = fw.get("proposed_policy")
+        if pol:
+            if pol.get("src_object_cli"):
+                parts.append(pol["src_object_cli"].replace("<TICKET_ID>", ticket))
+                parts.append("")
+            for svc_cli in pol.get("service_object_cli_blocks", []):
+                parts.append(svc_cli.replace("<TICKET_ID>", ticket))
+                parts.append("")
+            if pol.get("cli"):
+                parts.append(pol["cli"].replace("<TICKET_ID>", ticket))
+                parts.append("")
+
+        # Option B: group-append alternative
+        alt = fw.get("group_append_alternative")
+        if alt and alt.get("group_cli"):
+            parts.append(f"# {'-' * 77}")
+            parts.append(f"# OPTION B: append new FQDN objects to existing group {alt.get('group', '')!r}")
+            parts.append(f"# {'-' * 77}")
+            parts.append(alt["group_cli"].replace("<TICKET_ID>", ticket))
+            parts.append("")
+
     return "\n".join(parts)
 
 
@@ -500,6 +604,109 @@ def render_html(
 """
 
 
+def render_fqdn_html(
+    data: dict,
+    generated_at: str = "",
+    model: str = "",
+    cost_usd: str = "",
+) -> str:
+    """Render FQDN allowlist plan as an HTML report."""
+    ticket = data.get("ticket_id") or "(no ticket ID yet)"
+    vendor = esc(data.get("vendor", ""))
+    category = esc(data.get("category", ""))
+    src_ip = esc(data.get("src_ip", ""))
+
+    fw_sections = []
+    for fw in data.get("per_firewall", []):
+        verdict = fw.get("verdict", "")
+        verdict_cls = {
+            "new_rule": "verdict-allowed",
+            "already_covered": "verdict-allowed",
+            "blocked_exception": "verdict-blocked",
+            "unknown_no_action": "verdict-unknown",
+            "error": "verdict-unknown",
+            "partial_coverage": "verdict-allowed",
+        }.get(verdict, "verdict-unknown")
+
+        uncovered_rows = "".join(
+            f"<tr><td><code>{esc(e['fqdn'])}</code></td>"
+            f"<td>{esc(', '.join(str(p) for p in e.get('ports', [])))}</td>"
+            f"<td>{esc(e.get('protocol', ''))}</td>"
+            f"<td>{'Yes' if e.get('required') else 'No'}</td>"
+            f"<td>{esc(e.get('comment', ''))}</td></tr>"
+            for e in fw.get("uncovered_entries", [])
+        )
+        covered_rows = "".join(
+            f"<tr><td><code>{esc(e['fqdn'])}</code></td>"
+            f"<td>{esc(', '.join(str(p) for p in e.get('ports', [])))}</td>"
+            f"<td>{esc(e.get('protocol', ''))}</td>"
+            f"<td>Already covered</td><td></td></tr>"
+            for e in fw.get("covered_entries", [])
+        )
+
+        obj_rows = "".join(
+            f"<tr><td><code>{esc(o['name'])}</code></td>"
+            f"<td>{esc(o['obj_type'])}</td>"
+            f"<td><code>{esc(o['value'])}</code></td></tr>"
+            for o in fw.get("proposed_objects", [])
+        )
+
+        grp = fw.get("proposed_group") or {}
+        pol = fw.get("proposed_policy") or {}
+
+        fw_sections.append(f"""
+<section class="firewall-section">
+  <h2>Firewall: <code>{esc(fw.get('firewall', ''))}</code>
+      &nbsp;<span class="badge {verdict_cls}">{esc(verdict)}</span>
+      {' &nbsp;<span class="badge badge-warn">DEGRADED</span>' if fw.get('degraded') else ''}
+  </h2>
+  <p><strong>Source zone:</strong> <code>{esc(fw.get('src_zone', ''))}</code>
+     &nbsp;→&nbsp; <strong>Internet</strong> (FQDN destination)</p>
+  {f'<ul class="warnings">{"".join(f"<li>{esc(w)}</li>" for w in fw.get("warnings", []))}</ul>' if fw.get('warnings') else ''}
+
+  <h3>FQDN Coverage</h3>
+  <table>
+    <thead><tr><th>FQDN</th><th>Ports</th><th>Protocol</th><th>Required</th><th>Notes</th></tr></thead>
+    <tbody>{covered_rows}{uncovered_rows}</tbody>
+  </table>
+
+  {f'''<h3>Proposed Address Objects</h3>
+  <table>
+    <thead><tr><th>Name</th><th>Type</th><th>Value</th></tr></thead>
+    <tbody>{obj_rows}</tbody>
+  </table>''' if obj_rows else ''}
+
+  {f'<h3>Proposed Group: <code>{esc(grp.get("name",""))}</code></h3><p>Members: {esc(", ".join(grp.get("members",[])))}</p>' if grp else ''}
+  {f'<h3>Proposed Policy: <code>{esc(pol.get("name",""))}</code></h3>' if pol else ''}
+</section>""")
+
+    meta_line = _render_meta_line(generated_at, model, cost_usd)
+    return f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<title>FQDN Allowlist: {esc(ticket)}</title>
+<style>
+body{{font-family:sans-serif;max-width:1100px;margin:2em auto;padding:0 1em}}
+code{{background:#f4f4f4;padding:2px 4px;border-radius:3px}}
+table{{border-collapse:collapse;width:100%}}
+th,td{{border:1px solid #ddd;padding:6px 10px;text-align:left}}
+th{{background:#f8f8f8}}
+.verdict-allowed{{background:#d4edda;color:#155724;padding:2px 8px;border-radius:4px}}
+.verdict-blocked{{background:#f8d7da;color:#721c24;padding:2px 8px;border-radius:4px}}
+.verdict-unknown{{background:#fff3cd;color:#856404;padding:2px 8px;border-radius:4px}}
+.badge-warn{{background:#ffc107;color:#000;padding:2px 8px;border-radius:4px}}
+.warnings{{background:#fff3cd;border-left:4px solid #ffc107;padding:0.5em 1em;margin:1em 0}}
+.firewall-section{{border:1px solid #ddd;border-radius:6px;padding:1.5em;margin:1.5em 0}}
+</style>
+</head><body>
+<h1>FQDN Allowlist Change Plan</h1>
+<p><strong>Ticket:</strong> <code>{esc(ticket)}</code>
+   &nbsp; <strong>Vendor:</strong> {vendor} — {category}
+   &nbsp; <strong>Source:</strong> <code>{src_ip}</code></p>
+{f'<p class="meta">{meta_line}</p>' if meta_line else ''}
+{''.join(fw_sections)}
+</body></html>"""
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", required=True, help="Path to the JSON payload")
@@ -517,8 +724,23 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: could not read/parse {data_path}: {exc}", file=sys.stderr)
         return 1
 
+    plan_type = data.get("plan_type", "ip_change")
+    generated_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     try:
-        validate_payload(data)
+        if plan_type == "fqdn_allowlist":
+            validate_fqdn_payload(data)
+            html = render_fqdn_html(
+                data, generated_at=generated_at,
+                model=args.model, cost_usd=args.cost_usd,
+            )
+            conf = render_fqdn_conf(data)
+        else:
+            validate_payload(data)
+            html = render_html(
+                data, generated_at=generated_at,
+                model=args.model, cost_usd=args.cost_usd,
+            )
+            conf = render_conf(data)
     except PayloadError as exc:
         print(f"error: invalid payload: {exc}", file=sys.stderr)
         return 1
@@ -531,12 +753,8 @@ def main(argv: list[str] | None = None) -> int:
     conf_path = outdir / "implementation.conf"
     data_path = outdir / "payload.json"
 
-    generated_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    html_path.write_text(
-        render_html(data, generated_at=generated_at, model=args.model, cost_usd=args.cost_usd),
-        encoding="utf-8",
-    )
-    conf_path.write_text(render_conf(data), encoding="utf-8")
+    html_path.write_text(html, encoding="utf-8")
+    conf_path.write_text(conf, encoding="utf-8")
     data_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     print(str(html_path))

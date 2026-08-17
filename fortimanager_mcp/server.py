@@ -411,6 +411,35 @@ def search_address_objects(adom: str, ip: str) -> list[dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# Tool: search_fqdn_rules
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def search_fqdn_rules(adom: str, device: str, fqdns: list[str]) -> dict:
+    """
+    Find FortiManager policies that cover the requested FQDN/wildcard strings.
+
+    Searches all policy packages assigned to `device` in `adom`. For each
+    requested FQDN, returns whether it is covered by an existing rule, which
+    address object contains it, and which rule. Also returns a
+    partial_group_match hint when some FQDNs are covered and others are not
+    — used by plan_fqdn_change to propose a group-append alternative.
+
+    Exact string match only — "*.apple.com" does NOT cover "*.push.apple.com".
+    """
+    adom, device, err = _validate_or_error(adom, device)
+    if err:
+        return err
+    from fortimanager_mcp.query import search_fqdn_rules as _search
+    try:
+        with _fortimanager_client() as client:
+            return _search(client, adom, device, fqdns)
+    except Exception as e:
+        message, code = safe_error(e)
+        return {"error": message, "error_code": code, "degraded": True}
+
+
+# ---------------------------------------------------------------------------
 # Tool: get_service_object
 # ---------------------------------------------------------------------------
 

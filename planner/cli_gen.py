@@ -15,6 +15,16 @@ def _quote_list(names: list[str]) -> str:
     return " ".join(f'"{n}"' for n in names)
 
 
+def _safe_cli_str(s: str) -> str:
+    """Escape a string for embedding in a double-quoted FortiGate CLI field.
+
+    Replaces `"` with `''` (the FortiGate-CLI escape for a literal quote
+    inside a quoted string) and strips newlines/carriage-returns so an
+    attacker-controlled value cannot inject additional CLI commands.
+    """
+    return s.replace('"', "''").replace("\n", "").replace("\r", "")
+
+
 def address_object_cli(name: str, cidr: str) -> str:
     net = ipaddress.ip_network(cidr, strict=False)
     return (
@@ -120,10 +130,15 @@ def policy_addr_append_cli(policy_id: int, key: str, members: list[str]) -> str:
     )
 
 
-def addrgrp_create_cli(name: str, members: list[str]) -> str:
-    """CLI to create a new address group with the given members."""
+def addrgrp_create_cli(name: str, members: list[str], warn_replace: bool = False) -> str:
+    """CLI to create a new address group with the given members.
+
+    When ``warn_replace`` is True a comment is prepended reminding the engineer
+    that ``set member`` replaces all existing group members — use this whenever
+    a group may already exist in FortiManager.
+    """
     quoted = " ".join(f'"{m}"' for m in members)
-    return (
+    body = (
         'config firewall addrgrp\n'
         f'    edit "{name}"\n'
         f'        set member {quoted}\n'
@@ -131,3 +146,41 @@ def addrgrp_create_cli(name: str, members: list[str]) -> str:
         '    next\n'
         'end'
     )
+    if warn_replace:
+        warning = (
+            "# WARNING: 'set member' replaces all existing members. "
+            "Verify existing members first.\n"
+        )
+        return warning + body
+    return body
+
+
+def fqdn_address_object_cli(name: str, fqdn_str: str, comment: str = "") -> str:
+    """CLI block to create an address object of type fqdn."""
+    safe_fqdn = _safe_cli_str(fqdn_str)
+    lines = [
+        "config firewall address",
+        f'    edit "{name}"',
+        "        set type fqdn",
+        f'        set fqdn "{safe_fqdn}"',
+    ]
+    if comment:
+        lines.append(f'        set comment "{_safe_cli_str(comment)}"')
+    lines += ["    next", "end"]
+    return "\n".join(lines)
+
+
+def wildcard_fqdn_address_object_cli(name: str, wildcard_str: str,
+                                      comment: str = "") -> str:
+    """CLI block to create an address object of type wildcard-fqdn."""
+    safe_wildcard = _safe_cli_str(wildcard_str)
+    lines = [
+        "config firewall address",
+        f'    edit "{name}"',
+        "        set type wildcard-fqdn",
+        f'        set wildcard-fqdn "{safe_wildcard}"',
+    ]
+    if comment:
+        lines.append(f'        set comment "{_safe_cli_str(comment)}"')
+    lines += ["    next", "end"]
+    return "\n".join(lines)
