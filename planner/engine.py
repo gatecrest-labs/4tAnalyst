@@ -112,6 +112,8 @@ def _normalize_cidr(ip: str) -> str:
 
 
 def _address_object_plan(role: str, ip: str, snapshot: DeviceSnapshot) -> ObjectPlan:
+    if ip.strip().lower() in ("any", "all"):
+        return ObjectPlan(role=role, action="reuse", name="all", obj_type="named", value=ip)
     cidr = _normalize_cidr(ip)
     existing = snapshot.addr_catalog.exact_match_name(cidr)
     if existing:
