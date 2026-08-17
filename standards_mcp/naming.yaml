@@ -40,6 +40,38 @@ platforms:
         notes: >
           Check the global ADOM for an existing group before creating a per-ADOM object.
 
+      fqdn_address:
+        pattern: "FQDN-<hostname>"
+        examples:
+          - "FQDN-axm-adm-scep.apple.com"
+          - "FQDN-api.vendor.com"
+        notes: >
+          Used for address objects of type=fqdn (exact hostname match).
+          Only valid in the destination field of a FortiGate policy.
+          Maximum 79 characters — truncate if necessary.
+
+      wildcard_fqdn_address:
+        pattern: "WFQDN-<domain-without-asterisk-dot>"
+        examples:
+          - "WFQDN-push.apple.com"
+          - "WFQDN-cdn.vendor.com"
+        notes: >
+          Used for address objects of type=wildcard-fqdn (*.domain match).
+          Strip the leading "*." before applying the pattern.
+          Only valid in the destination field of a FortiGate policy.
+          Maximum 79 characters — truncate if necessary.
+
+      fqdn_destination_group:
+        pattern: "GRP-<Vendor>-<Category>-DST"
+        examples:
+          - "GRP-Apple-APNs-DST"
+          - "GRP-Microsoft-O365-DST"
+        notes: >
+          Destination address group for vendor FQDN allowlists.
+          Spaces in vendor/category names are replaced with hyphens.
+          Maximum 79 characters — truncate if necessary.
+          Verify this pattern against your team's actual standards before use.
+
       service:
         pattern: "SVC_<PROTO>_<PORT>"
         examples:

@@ -533,3 +533,91 @@ class PolicyMatcher:
             return True, False
         return False, False
 
+
+class FQDNCatalog:
+    """Resolves FortiManager address object/group refs to sets of FQDN strings.
+
+    Parallel to AddressCatalog. IP-only objects return an empty set (known,
+    but contribute no FQDNs). Unknown refs return None — same contract as
+    AddressCatalog: callers must treat None as "cannot prove coverage".
+    """
+
+    def __init__(self, objects: list[dict], groups: list[dict]) -> None:
+        self._objects: dict[str, dict] = {}
+        self._groups: dict[str, dict] = {}
+        for o in objects:
+            if isinstance(o, dict) and "name" in o:
+                self._objects[o["name"]] = o
+        for g in groups:
+            if isinstance(g, dict) and "name" in g:
+                self._groups[g["name"]] = g
+
+    def fqdns_for_ref(self, name: str) -> set[str] | None:
+        """FQDN strings reachable from the named object or group, or None if unknown."""
+        return self._resolve(name, seen=set())
+
+    def exact_match_name(self, fqdn_str: str) -> str | None:
+        """Name of an existing address object exactly matching this FQDN string."""
+        for name, obj in self._objects.items():
+            obj_type = str(obj.get("type", "")).lower()
+            if obj_type == "fqdn" and obj.get("fqdn", "") == fqdn_str:
+                return name
+            # VERIFY: FortiManager JSON field for wildcard-fqdn type — expected "wildcard-fqdn"
+            if obj_type == "wildcard-fqdn" and obj.get("wildcard-fqdn", "") == fqdn_str:
+                return name
+        return None
+
+    def groups_containing_fqdn(self, fqdn_str: str) -> set[str]:
+        """All groups that (transitively) contain an object matching fqdn_str."""
+        obj_name = self.exact_match_name(fqdn_str)
+        if obj_name is None:
+            return set()
+        parents: dict[str, set[str]] = {}
+        for gname, g in self._groups.items():
+            for m in _names(g.get("member", [])):
+                parents.setdefault(m, set()).add(gname)
+        result: set[str] = set()
+        queue = [obj_name]
+        while queue:
+            for p in parents.get(queue.pop(), ()):
+                if p not in result:
+                    result.add(p)
+                    queue.append(p)
+        return result
+
+    def _resolve(self, name: str, seen: set[str]) -> set[str] | None:
+        if name in seen:
+            return set()
+        seen.add(name)
+
+        obj = self._objects.get(name)
+        if obj is not None:
+            return self._fqdns_for_object(obj)
+
+        group = self._groups.get(name)
+        if group is not None:
+            result: set[str] = set()
+            any_known = False
+            for m in group.get("member", []):
+                member_name = m if isinstance(m, str) else m.get("name", "")
+                sub = self._resolve(member_name, seen)
+                if sub is not None:
+                    any_known = True
+                    result.update(sub)
+            return result if any_known else None
+
+        return None
+
+    @staticmethod
+    def _fqdns_for_object(obj: dict) -> set[str]:
+        obj_type = str(obj.get("type", "")).lower()
+        if obj_type == "fqdn":
+            v = obj.get("fqdn", "")
+            return {v} if v else set()
+        # VERIFY: FortiManager JSON field name for wildcard-fqdn — expected "wildcard-fqdn"
+        if obj_type == "wildcard-fqdn":
+            v = obj.get("wildcard-fqdn", "")
+            return {v} if v else set()
+        # IP-type, geo, dynamic, mac — known but no FQDNs
+        return set()
+

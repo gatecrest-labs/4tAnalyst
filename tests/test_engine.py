@@ -1116,3 +1116,41 @@ def test_blocked_recommendation_names_governing_policy():
     assert "OT and CIP-H Block All" in plan.recommendation, (
         "Blocking policy name must appear in the recommendation text"
     )
+
+
+# ---------------------------------------------------------------------------
+# FQDN guard
+# ---------------------------------------------------------------------------
+
+def test_plan_change_rejects_fqdn_src():
+    from planner.engine import plan_change
+    from planner.models import PlannerDataError, TargetFirewall
+
+    with pytest.raises(PlannerDataError) as exc:
+        plan_change(
+            src="*.example.com",
+            dst="10.2.2.2",
+            service="443",
+            firewalls=[TargetFirewall(device="FW1", adom="root")],
+            zone_client=FakeZoneClient(),
+            fmg_client=FakeFMGClient(),
+        )
+    assert exc.value.source == "request"
+    assert "plan_fqdn_change" in exc.value.detail
+
+
+def test_plan_change_rejects_fqdn_dst():
+    from planner.engine import plan_change
+    from planner.models import PlannerDataError, TargetFirewall
+
+    with pytest.raises(PlannerDataError) as exc:
+        plan_change(
+            src="10.1.1.1",
+            dst="server.corp.example.com",
+            service="443",
+            firewalls=[TargetFirewall(device="FW1", adom="root")],
+            zone_client=FakeZoneClient(),
+            fmg_client=FakeFMGClient(),
+        )
+    assert exc.value.source == "request"
+    assert "plan_fqdn_change" in exc.value.detail

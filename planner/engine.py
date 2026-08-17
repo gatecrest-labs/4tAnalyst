@@ -31,11 +31,16 @@ from planner.fetch import (
     fetch_device_snapshot,
     fetch_zone_domains,
     fetch_zone_verdict,
+    resolve_interfaces,
 )
 from planner.insertion import plan_insertion
 from planner.models import (
     ChangePlan,
     FirewallPlan,
+    FQDNAddressObject,
+    FQDNAddrGroup,
+    FQDNChangePlan,
+    FQDNFirewallPlan,
     GroupAppendAlternative,
     InsertionPlan,
     NormalizedFlow,
@@ -144,6 +149,36 @@ def _service_object_plan(token: str, snapshot: DeviceSnapshot) -> ObjectPlan:
 # Sides with more members than this get a dedicated address group; smaller
 # sets are inlined directly in the policy's srcaddr/dstaddr.
 GROUP_THRESHOLD = 3
+
+# ---------------------------------------------------------------------------
+# FQDN allowlist planner constants and name helpers
+# ---------------------------------------------------------------------------
+
+_FQDN_NAME_MAX = 79
+_INTERNET_SENTINEL = "8.8.8.8"  # well-known public IP that resolves to Internet zone
+
+
+def _fqdn_object_name(fqdn_str: str) -> tuple[str, str]:
+    """Return (obj_type, truncated_name) for an FQDN or wildcard-FQDN string."""
+    if fqdn_str.startswith("*."):
+        name = f"WFQDN-{fqdn_str[2:]}"
+        obj_type = "wildcard-fqdn"
+    else:
+        name = f"FQDN-{fqdn_str}"
+        obj_type = "fqdn"
+    if len(name) > _FQDN_NAME_MAX:
+        name = name[:_FQDN_NAME_MAX - 3] + "..."
+    return obj_type, name
+
+
+def _fqdn_group_name(vendor: str, category: str) -> str:
+    """Return GRP-<Vendor>-<Category>-DST with spaces as hyphens, ≤79 chars."""
+    v = vendor.replace(" ", "-")
+    c = category.replace(" ", "-")
+    name = f"GRP-{v}-{c}-DST"
+    if len(name) > _FQDN_NAME_MAX:
+        name = name[:_FQDN_NAME_MAX - 3] + "..."
+    return name
 
 
 def _side_plan(
@@ -768,6 +803,15 @@ def plan_change(
     dsts = _norm_list(dst, "dst")
     services = _norm_list(service, "service")
 
+    for _v in srcs + dsts:
+        try:
+            ipaddress.ip_network(_v, strict=False)
+        except ValueError:
+            raise PlannerDataError(
+                "request",
+                f"{_v!r} is not a valid IP/CIDR. Use plan_fqdn_change() for FQDN-based requests.",
+            )
+
     service_ranges = []
     for tok in services:
         try:
@@ -980,4 +1024,301 @@ def to_report_payload(plan: ChangePlan) -> dict:
             "status": plan.cli_status,
             "per_firewall": per_firewall,
         },
+    }
+
+
+# ---------------------------------------------------------------------------
+# FQDN allowlist planner
+# ---------------------------------------------------------------------------
+
+def _plan_fqdn_firewall(
+    target: TargetFirewall,
+    request,
+    zone_result: dict,
+    fmg_client,
+) -> FQDNFirewallPlan:
+    from fortimanager_mcp.query import search_fqdn_rules
+
+    src_zones = zone_result.get("src_zones", [])
+    src_zone = src_zones[0] if src_zones else "Unknown"
+    raw_verdict = zone_result.get("verdict", "UNKNOWN")
+
+    if raw_verdict == "UNKNOWN":
+        fw_verdict = "unknown_no_action"
+    elif raw_verdict == "BLOCKED":
+        fw_verdict = "blocked_exception"
+    else:
+        fw_verdict = "new_rule"
+
+    fw = FQDNFirewallPlan(
+        firewall=target.device, adom=target.adom,
+        verdict=fw_verdict, src_zone=src_zone,
+        coverage="n/a",
+        covered_entries=[], uncovered_entries=list(request.entries),
+        proposed_objects=[], proposed_group=None,
+        proposed_policy=None, group_append_alternative=None,
+        degraded=False, warnings=list(zone_result.get("notes", [])),
+    )
+
+    if fw_verdict == "unknown_no_action":
+        fw.warnings.append("Zone verdict UNKNOWN — no FQDN rule analysis performed")
+        return fw
+
+    try:
+        snapshot = fetch_device_snapshot(fmg_client, target.adom, target.device)
+    except PlannerDataError as exc:
+        fw.degraded = True
+        fw.verdict = "error"
+        fw.warnings.append(str(exc))
+        return fw
+
+    if snapshot.degraded:
+        fw.degraded = True
+        fw.warnings.append(
+            f"FortiManager data for {target.device} is incomplete "
+            f"({'; '.join(snapshot.failures)}) — 'no existing rule' is NOT conclusive."
+        )
+        fw.warnings.extend(snapshot.zone_map_warnings)
+
+    fqdn_strings = [e.fqdn for e in request.entries]
+    cov = search_fqdn_rules(fmg_client, target.adom, target.device, fqdn_strings)
+
+    if cov.get("degraded") and not fw.degraded:
+        fw.degraded = True
+        fw.warnings.append("FQDN rule search degraded — results may be incomplete")
+
+    covered_set = {
+        r["fqdn"] for r in cov["results"]
+        if r["covered"] and r.get("rule_enabled", True)
+    }
+    fw.covered_entries = [e for e in request.entries if e.fqdn in covered_set]
+    fw.uncovered_entries = [e for e in request.entries if e.fqdn not in covered_set]
+
+    if not fw.degraded and not fw.uncovered_entries:
+        if fw.verdict != "blocked_exception":
+            fw.verdict = "already_covered"
+        fw.coverage = "already_covered"
+        return fw
+
+    fw.coverage = "partial_coverage" if fw.covered_entries else "new_rule"
+    if fw.verdict not in ("blocked_exception",):
+        fw.verdict = fw.coverage  # "new_rule" or "partial_coverage"
+
+    # Resolve interfaces (src IP is an IP; use internet sentinel for dst)
+    srcintf, dstintf, iface_warnings = resolve_interfaces(
+        snapshot, request.src_ip, _INTERNET_SENTINEL
+    )
+    fw.warnings.extend(iface_warnings)
+
+    # Build proposed FQDN address objects
+    obj_warnings: list[str] = []
+    proposed_objects: list[FQDNAddressObject] = []
+    seen_names: set[str] = set()
+    for entry in fw.uncovered_entries:
+        obj_type, name = _fqdn_object_name(entry.fqdn)
+        if name.endswith("..."):
+            obj_warnings.append(
+                f"Object name for {entry.fqdn!r} truncated to 79 chars: {name!r}"
+            )
+        # Collision detection: two FQDNs with the same 76-char prefix generate
+        # identical truncated names; disambiguate by appending -2, -3, etc.
+        if name in seen_names:
+            suffix_n = 2
+            base = name[:-3] if name.endswith("...") else name
+            # Keep new name under _FQDN_NAME_MAX (79) chars
+            while True:
+                suffix = f"-{suffix_n}"
+                candidate = base[: _FQDN_NAME_MAX - len(suffix)] + suffix
+                if candidate not in seen_names:
+                    name = candidate
+                    break
+                suffix_n += 1
+            obj_warnings.append(
+                f"Object name collision for {entry.fqdn!r}: renamed to {name!r}"
+            )
+        seen_names.add(name)
+        comment_str = f"{entry.comment or (request.vendor + ' ' + request.category)} - <TICKET_ID>"
+        cli_fn = (cli_gen.fqdn_address_object_cli if obj_type == "fqdn"
+                  else cli_gen.wildcard_fqdn_address_object_cli)
+        proposed_objects.append(FQDNAddressObject(
+            name=name, obj_type=obj_type, value=entry.fqdn,
+            comment=comment_str, cli=cli_fn(name, entry.fqdn, comment_str),
+        ))
+    fw.proposed_objects = proposed_objects
+    fw.warnings.extend(obj_warnings)
+
+    # Build address group
+    group_name = _fqdn_group_name(request.vendor, request.category)
+    existing_obj_names = [
+        r["address_object_name"] for r in cov["results"]
+        if r["covered"] and r["address_object_name"]
+    ]
+    all_member_names = existing_obj_names + [o.name for o in proposed_objects]
+    group_comment = f"{request.vendor} {request.category} - <TICKET_ID>"
+    fw.proposed_group = FQDNAddrGroup(
+        name=group_name, members=all_member_names, comment=group_comment,
+        cli=cli_gen.addrgrp_create_cli(group_name, all_member_names, warn_replace=True),
+    )
+
+    # GroupAppendAlternative (Option B) for partial coverage
+    partial = cov.get("partial_group_match")
+    if partial and fw.coverage == "partial_coverage":
+        new_names = [o.name for o in proposed_objects]
+        fw.group_append_alternative = GroupAppendAlternative(
+            package=snapshot.packages[0] if snapshot.packages else "",
+            policy_id=0,
+            policy_name="",
+            side="destination",
+            group=partial["group_name"],
+            members=[],
+            group_cli=cli_gen.addrgrp_append_cli(partial["group_name"], new_names),
+        )
+
+    # Source address object
+    src_obj = _address_object_plan("source", request.src_ip, snapshot)
+
+    # Service objects — one per unique (protocol, port) pair across uncovered entries
+    seen_svc: set[tuple[str, int]] = set()
+    svc_names: list[str] = []
+    svc_cli_blocks: list[str] = []
+    for entry in fw.uncovered_entries:
+        for port in entry.ports:
+            key = (entry.protocol.lower(), port)
+            if key not in seen_svc:
+                seen_svc.add(key)
+                svc_name = f"SVC_{entry.protocol.upper()}_{port}"
+                svc_names.append(svc_name)
+                svc_cli_blocks.append(
+                    cli_gen.service_object_cli(svc_name, entry.protocol.lower(), str(port))
+                )
+    if not svc_names:
+        svc_names = ["ALL"]
+
+    # Policy
+    log_cfg = standards.log_settings("allow_internet_outbound")
+    policy_name_str = standards.policy_name(
+        request.ticket_id, srcintf or "any", dstintf or "any"
+    )
+    pol_cli = cli_gen.policy_cli(
+        name=policy_name_str,
+        srcintf=srcintf or "any",
+        dstintf=dstintf or "any",
+        srcaddr=[src_obj.name],
+        dstaddr=[group_name],
+        service=svc_names,
+        logtraffic="all" if log_cfg.get("log_end", True) else "disable",
+        logtraffic_start=bool(log_cfg.get("log_start", False)),
+        comments=f"FQDN allowlist {request.vendor} {request.category} <TICKET_ID>",
+        insert_before=None,
+    )
+    fw.proposed_policy = {
+        "name": policy_name_str,
+        "srcintf": srcintf or "any",
+        "dstintf": dstintf or "any",
+        "srcaddr": [src_obj.name],
+        "dstaddr": [group_name],
+        "service": svc_names,
+        "src_object_cli": src_obj.cli,
+        "service_object_cli_blocks": svc_cli_blocks,
+        "cli": pol_cli,
+    }
+    return fw
+
+
+def plan_fqdn_change(
+    request,
+    fmg_client=None,
+    zone_client=None,
+) -> FQDNChangePlan:
+    """Compute a deterministic FQDN allowlist change plan.
+
+    Resolves zone verdict from src_ip only (destination is Internet by design).
+    Searches existing FortiManager rules for FQDN coverage. Proposes
+    fqdn/wildcard-fqdn address objects, one destination group, and a policy
+    per firewall for any uncovered entries.
+    """
+    zc = zone_client or _default_zone_client()
+    fmc = fmg_client or _default_fmg_client()
+
+    try:
+        zone_result = fetch_zone_verdict(zc, request.src_ip, _INTERNET_SENTINEL, "tcp/443")
+    except PlannerDataError as exc:
+        # Zone client unavailable — degrade all firewalls
+        zone_warn = f"Zone client unavailable: {exc}"
+        fw_plans_degraded: list[FQDNFirewallPlan] = []
+        for raw in request.firewalls:
+            device, sep, adom = raw.partition(":")
+            fw_plans_degraded.append(FQDNFirewallPlan(
+                firewall=device if sep else raw,
+                adom=adom if sep else "",
+                verdict="unknown_no_action", src_zone="Unknown",
+                coverage="n/a", covered_entries=[],
+                uncovered_entries=list(request.entries),
+                proposed_objects=[], proposed_group=None, proposed_policy=None,
+                group_append_alternative=None, degraded=True,
+                warnings=[zone_warn],
+            ))
+        return FQDNChangePlan(request=request, per_firewall=fw_plans_degraded)
+
+    perm_warnings = standards.permissiveness_warnings(
+        [request.src_ip],
+        [e.fqdn for e in request.entries],
+        [],
+    )
+
+    fw_plans: list[FQDNFirewallPlan] = []
+    for raw in request.firewalls:
+        device, sep, adom = raw.partition(":")
+        if not sep or not device or not adom:
+            fw_plans.append(FQDNFirewallPlan(
+                firewall=raw, adom="", verdict="error", src_zone="Unknown",
+                coverage="n/a", covered_entries=[], uncovered_entries=list(request.entries),
+                proposed_objects=[], proposed_group=None, proposed_policy=None,
+                group_append_alternative=None, degraded=True,
+                warnings=[f"Invalid firewall spec {raw!r} — expected DEVICE:ADOM"],
+            ))
+            continue
+        target = TargetFirewall(device=device, adom=adom)
+        fw = _plan_fqdn_firewall(target, request, zone_result, fmc)
+        fw.warnings = list(perm_warnings) + fw.warnings
+        fw_plans.append(fw)
+
+    return FQDNChangePlan(request=request, per_firewall=fw_plans)
+
+
+def to_fqdn_report_payload(plan: FQDNChangePlan) -> dict:
+    """Emit the render_report.py schema for an FQDN allowlist plan."""
+    import dataclasses
+
+    req = plan.request
+    fw_list = []
+    for fw in plan.per_firewall:
+        fw_dict: dict = {
+            "firewall": fw.firewall,
+            "adom": fw.adom,
+            "verdict": fw.verdict,
+            "src_zone": fw.src_zone,
+            "coverage": fw.coverage,
+            "degraded": fw.degraded,
+            "warnings": fw.warnings,
+            "covered_entries": [dataclasses.asdict(e) for e in fw.covered_entries],
+            "uncovered_entries": [dataclasses.asdict(e) for e in fw.uncovered_entries],
+            "proposed_objects": [dataclasses.asdict(o) for o in fw.proposed_objects],
+            "proposed_group": dataclasses.asdict(fw.proposed_group) if fw.proposed_group else None,
+            "proposed_policy": fw.proposed_policy,
+            "group_append_alternative": (
+                dataclasses.asdict(fw.group_append_alternative)
+                if fw.group_append_alternative else None
+            ),
+        }
+        fw_list.append(fw_dict)
+
+    return {
+        "plan_type": "fqdn_allowlist",
+        "vendor": req.vendor,
+        "category": req.category,
+        "src_ip": req.src_ip,
+        "ticket_id": req.ticket_id,
+        "per_firewall": fw_list,
+        "warnings": [w for fw in plan.per_firewall for w in fw.warnings],
     }

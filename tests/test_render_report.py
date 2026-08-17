@@ -4,7 +4,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
+import pytest  # noqa: E402
 import render_report  # noqa: E402
+from render_report import (  # noqa: E402
+    render_fqdn_conf,
+    render_fqdn_html,
+    validate_fqdn_payload,
+)
 
 
 def _minimal_payload(**overrides):
@@ -515,3 +521,113 @@ def test_render_html_existing_rules_backward_compat_old_payload():
     assert covering_pos < partial_label_pos, (
         "covering rule 'legacy-allow' should appear before the 'Partial / overlapping matches' label"
     )
+
+
+def _fqdn_payload():
+    return {
+        "plan_type": "fqdn_allowlist",
+        "vendor": "Apple",
+        "category": "APNs",
+        "src_ip": "10.1.2.3",
+        "ticket_id": "CHG001",
+        "per_firewall": [
+            {
+                "firewall": "FW1",
+                "adom": "OT-ADOM",
+                "verdict": "new_rule",
+                "src_zone": "OT-LAN",
+                "coverage": "new_rule",
+                "degraded": False,
+                "warnings": [],
+                "covered_entries": [],
+                "uncovered_entries": [
+                    {"fqdn": "*.push.apple.com", "is_wildcard": True,
+                     "ports": [443, 5223], "protocol": "TCP",
+                     "required": True, "comment": "APNs push"},
+                ],
+                "proposed_objects": [
+                    {"name": "WFQDN-push.apple.com", "obj_type": "wildcard-fqdn",
+                     "value": "*.push.apple.com",
+                     "comment": "Apple APNs - <TICKET_ID>",
+                     "cli": 'config firewall address\n    edit "WFQDN-push.apple.com"\n        set type wildcard-fqdn\n        set wildcard-fqdn "*.push.apple.com"\n        set comment "Apple APNs - <TICKET_ID>"\n    next\nend'},
+                ],
+                "proposed_group": {
+                    "name": "GRP-Apple-APNs-DST",
+                    "members": ["WFQDN-push.apple.com"],
+                    "comment": "Apple APNs - <TICKET_ID>",
+                    "cli": 'config firewall addrgrp\n    edit "GRP-Apple-APNs-DST"\n        set member "WFQDN-push.apple.com"\n        set comment "<TICKET_ID>"\n    next\nend',
+                },
+                "proposed_policy": {
+                    "name": "CHG001_PORT1_TO_ANY_001",
+                    "srcaddr": ["H_10.1.2.3"],
+                    "dstaddr": ["GRP-Apple-APNs-DST"],
+                    "service": ["SVC_TCP_443"],
+                    "src_object_cli": "",
+                    "service_object_cli_blocks": [],
+                    "cli": "config firewall policy\n    edit 0\n        set name \"CHG001\"\n    next\nend",
+                },
+                "group_append_alternative": None,
+            }
+        ],
+        "warnings": [],
+    }
+
+
+def test_validate_fqdn_payload_valid():
+    validate_fqdn_payload(_fqdn_payload())  # should not raise
+
+
+def test_validate_fqdn_payload_missing_plan_type():
+    data = _fqdn_payload()
+    del data["plan_type"]
+    with pytest.raises(render_report.PayloadError):
+        validate_fqdn_payload(data)
+
+
+def test_render_fqdn_conf_new_rule():
+    conf = render_fqdn_conf(_fqdn_payload())
+    assert "WFQDN-push.apple.com" in conf
+    assert "GRP-Apple-APNs-DST" in conf
+    assert "CHG001" in conf
+    assert "wildcard-fqdn" in conf
+
+
+def test_render_fqdn_conf_already_covered():
+    data = _fqdn_payload()
+    data["per_firewall"][0]["verdict"] = "already_covered"
+    data["per_firewall"][0]["coverage"] = "already_covered"
+    data["per_firewall"][0]["proposed_objects"] = []
+    data["per_firewall"][0]["proposed_group"] = None
+    data["per_firewall"][0]["proposed_policy"] = None
+    conf = render_fqdn_conf(data)
+    assert "already covered" in conf.lower() or "already_covered" in conf
+
+
+def test_render_fqdn_html_contains_vendor_and_fqdn():
+    html = render_fqdn_html(_fqdn_payload())
+    assert "Apple" in html
+    assert "APNs" in html
+    assert "*.push.apple.com" in html
+    assert "GRP-Apple-APNs-DST" in html
+    assert "CHG001" in html
+
+
+# ---------------------------------------------------------------------------
+# Dispatch tests — verifying main() branches on plan_type (Finding I2)
+# ---------------------------------------------------------------------------
+
+def test_validate_payload_rejects_fqdn_allowlist_payload():
+    """validate_payload (IP-path) must raise PayloadError on an fqdn_allowlist payload.
+    This confirms that the dispatch in main() is necessary — without it an fqdn payload
+    would fail validation and never produce a report.
+    """
+    with pytest.raises(render_report.PayloadError):
+        render_report.validate_payload(_fqdn_payload())
+
+
+def test_validate_fqdn_payload_rejects_ip_change_payload():
+    """validate_fqdn_payload must raise PayloadError when plan_type != 'fqdn_allowlist'."""
+    ip_payload = _minimal_payload()
+    # _minimal_payload() has no plan_type key; validate_fqdn_payload should reject it
+    with pytest.raises(render_report.PayloadError):
+        validate_fqdn_payload(ip_payload)
