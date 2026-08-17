@@ -137,12 +137,20 @@ def parse_fqdn_rows(
 
     if not src_ip:
         missing.append("src_ip")
+    elif src_ip.strip().lower() in ("any", "all"):
+        warnings.append(
+            f"src_ip {src_ip!r} will be treated as FortiGate built-in 'all' address object — "
+            "policy will allow traffic from any source zone. Consider restricting to a specific subnet."
+        )
     else:
         try:
-            ipaddress.ip_network(src_ip, strict=False)
+            ipaddress.ip_network(src_ip.strip(), strict=False)
         except ValueError:
-            missing.append("src_ip")
-            warnings.append(f"src_ip {src_ip!r} is not a valid IP/CIDR")
+            # Treat as a named FortiGate address object or group — not an error
+            warnings.append(
+                f"src_ip {src_ip!r} is not a valid IP/CIDR — treating as a FortiGate address "
+                "object/group name. Zone verdict will be skipped; verify the object exists in FortiManager."
+            )
 
     return FQDNAllowlistRequest(
         vendor=vendor,

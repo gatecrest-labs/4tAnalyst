@@ -158,6 +158,14 @@ _FQDN_NAME_MAX = 79
 _INTERNET_SENTINEL = "8.8.8.8"  # well-known public IP that resolves to Internet zone
 
 
+def _is_valid_ip(value: str) -> bool:
+    try:
+        ipaddress.ip_network(value.strip(), strict=False)
+        return True
+    except ValueError:
+        return False
+
+
 def _fqdn_object_name(fqdn_str: str) -> tuple[str, str]:
     """Return (obj_type, truncated_name) for an FQDN or wildcard-FQDN string."""
     if fqdn_str.startswith("*."):
@@ -1237,28 +1245,36 @@ def plan_fqdn_change(
     fqdn/wildcard-fqdn address objects, one destination group, and a policy
     per firewall for any uncovered entries.
     """
-    zc = zone_client or _default_zone_client()
     fmc = fmg_client or _default_fmg_client()
 
-    try:
-        zone_result = fetch_zone_verdict(zc, request.src_ip, _INTERNET_SENTINEL, "tcp/443")
-    except PlannerDataError as exc:
-        # Zone client unavailable — degrade all firewalls
-        zone_warn = f"Zone client unavailable: {exc}"
-        fw_plans_degraded: list[FQDNFirewallPlan] = []
-        for raw in request.firewalls:
-            device, sep, adom = raw.partition(":")
-            fw_plans_degraded.append(FQDNFirewallPlan(
-                firewall=device if sep else raw,
-                adom=adom if sep else "",
-                verdict="unknown_no_action", src_zone="Unknown",
-                coverage="n/a", covered_entries=[],
-                uncovered_entries=list(request.entries),
-                proposed_objects=[], proposed_group=None, proposed_policy=None,
-                group_append_alternative=None, degraded=True,
-                warnings=[zone_warn],
-            ))
-        return FQDNChangePlan(request=request, per_firewall=fw_plans_degraded)
+    _src_lower = request.src_ip.strip().lower()
+    _src_is_named = _src_lower in ("any", "all") or not _is_valid_ip(request.src_ip)
+
+    if _src_is_named:
+        # ANY/ALL or a named FortiGate object — skip zone API, proceed straight to coverage
+        _src_zone_label = "any" if _src_lower in ("any", "all") else request.src_ip
+        zone_result: dict = {"verdict": "ALLOWED", "src_zones": [_src_zone_label], "notes": []}
+    else:
+        zc = zone_client or _default_zone_client()
+        try:
+            zone_result = fetch_zone_verdict(zc, request.src_ip, _INTERNET_SENTINEL, "tcp/443")
+        except PlannerDataError as exc:
+            # Zone client unavailable — degrade all firewalls
+            zone_warn = f"Zone client unavailable: {exc}"
+            fw_plans_degraded: list[FQDNFirewallPlan] = []
+            for raw in request.firewalls:
+                device, sep, adom = raw.partition(":")
+                fw_plans_degraded.append(FQDNFirewallPlan(
+                    firewall=device if sep else raw,
+                    adom=adom if sep else "",
+                    verdict="unknown_no_action", src_zone="Unknown",
+                    coverage="n/a", covered_entries=[],
+                    uncovered_entries=list(request.entries),
+                    proposed_objects=[], proposed_group=None, proposed_policy=None,
+                    group_append_alternative=None, degraded=True,
+                    warnings=[zone_warn],
+                ))
+            return FQDNChangePlan(request=request, per_firewall=fw_plans_degraded)
 
     perm_warnings = standards.permissiveness_warnings(
         [request.src_ip],
