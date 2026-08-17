@@ -162,6 +162,13 @@ def create_router(
             {"user": user, "active_tab": "graph"},
         )
 
+    @router.get("/api/admin/usage/summary")
+    async def usage_summary_api(request: Request) -> Any:
+        user = _user_or_redirect(request)
+        if isinstance(user, RedirectResponse):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return db.get_daily_totals()
+
     @router.get("/api/admin/usage")
     async def usage_api(request: Request, range: str = "86400") -> Any:
         user = _user_or_redirect(request)
