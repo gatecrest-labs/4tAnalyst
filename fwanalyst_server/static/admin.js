@@ -27,9 +27,20 @@
     });
   }
 
+  async function loadUsageSummary() {
+    const r = await fetch('/api/admin/usage/summary');
+    if (!r.ok) return;
+    const d = await r.json();
+    document.getElementById('usage-calls-24h').textContent = d.tool_calls_24h.toLocaleString();
+    document.getElementById('usage-tokens-24h').textContent = d.total_tokens_24h.toLocaleString();
+    document.getElementById('usage-cost-24h').textContent = '$' + d.estimated_cost_24h.toFixed(4);
+  }
+
   let activeRange = '1h';
   load(activeRange);
+  loadUsageSummary();
   setInterval(() => load(activeRange), 30000);
+  setInterval(loadUsageSummary, 60000);
   document.getElementById('dash-ranges').addEventListener('click', e => {
     const btn = e.target.closest('.range-btn');
     if (!btn) return;

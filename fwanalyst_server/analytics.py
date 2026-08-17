@@ -146,6 +146,29 @@ class AnalyticsDB:
             ).fetchone()
         return dict(row) if row else None
 
+    def get_daily_totals(self) -> dict:
+        """Return aggregated totals for the last 24 hours."""
+        since = int(time.time()) - 86400
+        with sqlite3.connect(self._db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            tc_count = conn.execute(
+                "SELECT COUNT(*) AS n FROM tool_calls WHERE ts >= ?", (since,)
+            ).fetchone()["n"]
+            ue = conn.execute(
+                "SELECT COALESCE(SUM(input_tokens),0) AS inp, "
+                "COALESCE(SUM(output_tokens),0) AS out, "
+                "COALESCE(SUM(estimated_cost),0) AS cost "
+                "FROM usage_events WHERE ts >= ?",
+                (since,),
+            ).fetchone()
+        return {
+            "tool_calls_24h": tc_count,
+            "input_tokens_24h": ue["inp"],
+            "output_tokens_24h": ue["out"],
+            "total_tokens_24h": ue["inp"] + ue["out"],
+            "estimated_cost_24h": ue["cost"],
+        }
+
     def purge_old_records(self, retention_days: int) -> None:
         cutoff = int(time.time()) - retention_days * 86400
         with sqlite3.connect(self._db_path) as conn:

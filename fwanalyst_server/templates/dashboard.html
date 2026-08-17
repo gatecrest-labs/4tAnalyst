@@ -1,6 +1,12 @@
 {% extends "base.html" %}
 {% block title_suffix %} - Dashboard{% endblock %}
 {% block content %}
+<h2>Usage — Last 24h</h2>
+<div class="metric-cards">
+  <div class="card"><span id="usage-calls-24h">--</span><label>Tool Calls</label></div>
+  <div class="card"><span id="usage-tokens-24h">--</span><label>Total Tokens</label></div>
+  <div class="card"><span id="usage-cost-24h">--</span><label>Est. Cost</label></div>
+</div>
 <h2>System Health</h2>
 <div class="metric-cards">
   <div class="card"><span id="cpu-val">--</span><label>CPU</label></div>
