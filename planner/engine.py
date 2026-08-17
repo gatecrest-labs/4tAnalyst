@@ -112,8 +112,6 @@ def _normalize_cidr(ip: str) -> str:
 
 
 def _address_object_plan(role: str, ip: str, snapshot: DeviceSnapshot) -> ObjectPlan:
-    if ip.strip().lower() in ("any", "all"):
-        return ObjectPlan(role=role, action="reuse", name="all", obj_type="named", value=ip)
     cidr = _normalize_cidr(ip)
     existing = snapshot.addr_catalog.exact_match_name(cidr)
     if existing:
@@ -1184,8 +1182,15 @@ def _plan_fqdn_firewall(
             group_cli=cli_gen.addrgrp_append_cli(partial["group_name"], new_names),
         )
 
-    # Source address object
-    src_obj = _address_object_plan("source", request.src_ip, snapshot)
+    # Source address object — 'all'/'any' maps to FortiGate built-in; named objects reused as-is
+    if request.src_ip.strip().lower() in ("any", "all", ""):
+        src_obj = ObjectPlan(role="source", action="reuse", name="all",
+                             obj_type="builtin", value="all")
+    elif not _is_valid_ip(request.src_ip):
+        src_obj = ObjectPlan(role="source", action="reuse", name=request.src_ip,
+                             obj_type="named_object", value=request.src_ip)
+    else:
+        src_obj = _address_object_plan("source", request.src_ip, snapshot)
 
     # Service objects — one per unique (protocol, port) pair across uncovered entries
     seen_svc: set[tuple[str, int]] = set()
