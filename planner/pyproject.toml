@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
     "pyyaml>=6.0",
     "httpx>=0.28.1",
-    "requests>=2.31",
+    "requests>=2.34.2",
 ]
 
 [tool.hatch.build.targets.wheel]
