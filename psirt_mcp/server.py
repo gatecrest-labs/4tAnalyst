@@ -155,6 +155,35 @@ def _build_fmg_client():
     return client
 
 
+def _build_extra_fmg_clients() -> list:
+    """Return (label, client) pairs for every backup FortiManager host beyond the first.
+
+    Each backup is built as a standalone client (no cross-failover) so that the
+    PSIRT engine can assess each instance independently. An unreachable backup is
+    still included in the list so the engine can flag it as degraded.
+    """
+    from fortimanager_mcp.client import FortiManagerClient
+
+    cfg = _load_credentials().get("fortimanager", {})
+    hosts = [(h.get("host", ""), h.get("api_key", "")) for h in cfg.get("hosts", [])]
+    hosts = [(h, k) for h, k in hosts if h and k]
+    extra = []
+    for i, (host, key) in enumerate(hosts[1:], 1):
+        label = f"FortiManager (backup {i}: {host})"
+        try:
+            client = FortiManagerClient(
+                primary_host=host, primary_key=key,
+                port=cfg.get("port", 443),
+                verify_ssl=cfg.get("verify_ssl", True),
+                version=str(cfg.get("version", "7.4")),
+            )
+            client.login()
+        except Exception:
+            client = None  # engine will flag as degraded when get_system_status() fails
+        extra.append((label, client))
+    return extra
+
+
 def _build_http_client():
     import httpx
 
@@ -170,28 +199,21 @@ def _psirt_config() -> dict:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def assess_fleet_exposure(advisory: dict[str, Any], output_dir: str = "") -> dict:
+def assess_fleet_exposure(advisory: dict[str, Any]) -> dict:
     """
     Assess the fleet's exposure to a PSIRT advisory.
 
     Parameters
     ----------
-    advisory   : dict — the output of parse_advisory (or matching shape).
-    output_dir : str  — base output directory for the saved assessment JSON and
-                 HTML report; defaults to a PSIRT/ folder next to this repo.
-                 Pass an absolute path to write to a specific location on the
-                 engineer's machine.
+    advisory : dict — the output of parse_advisory (or matching shape).
 
-    Always saves the full assessment JSON to
-    <output_dir>/<advisory_id>/assessment.json and renders the HTML report to
-    <output_dir>/<advisory_id>/<advisory_id>.html so large fleets never need
-    to relay the full payload back through the model context.
+    Returns a summary dict plus the rendered HTML as a string so the calling
+    Claude Code session can write the report to the local workstation — the
+    MCP server never writes files to disk.
 
-    Returns a summary dict (advisory metadata + verdict counts + file paths)
-    that is small enough to display regardless of fleet size.
+    The caller should write html_content to a local path such as:
+        output/PSIRT/<advisory_id>/<advisory_id>.html
     """
-    import json
-
     ranges = [
         AffectedRange(
             product=r.get("product", ""),
@@ -223,35 +245,25 @@ def assess_fleet_exposure(advisory: dict[str, Any], output_dir: str = "") -> dic
     kev_url = cfg.get("kev_feed_url", "") if cfg.get("fortiguard_advisory_fetch", True) is not False else ""
 
     fmg_client = _build_fmg_client()
+    extra_fmg = _build_extra_fmg_clients()
     http_client = _build_http_client()
-    result = assess(adv, fmg_client, http_client, kev_url)
+    result = assess(adv, fmg_client, http_client, kev_url, extra_fmg_clients=extra_fmg)
     payload = result.to_dict()
     payload["plan_type"] = "psirt_advisory"
 
-    # --- Save full assessment to disk so render never needs the inline payload ---
-    base = Path(output_dir).expanduser() if output_dir else (_REPO_ROOT / "PSIRT")
-    outdir = (base / advisory_id).resolve()
-    if not outdir.is_relative_to(base.resolve()):
-        return {"error": f"advisory_id would escape output directory: {advisory_id!r}"}
-    outdir.mkdir(parents=True, exist_ok=True)
-
-    json_path = outdir / "assessment.json"
-    json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-
-    # Render HTML immediately — no second tool call needed for normal fleets
+    # Render HTML in memory — no server-side disk writes.
+    # The caller (Claude Code on the workstation) receives html_content and
+    # writes it to a local path using its Write tool.
     sys.path.insert(0, str(_REPO_ROOT / "scripts"))
-    html_path: Path | None = None
+    html_content: str | None = None
     html_error: str | None = None
     try:
         from render_report import render_psirt_html, validate_psirt_payload
         validate_psirt_payload(payload)
-        html = render_psirt_html(payload)
-        html_path = outdir / f"{advisory_id}.html"
-        html_path.write_text(html, encoding="utf-8")
+        html_content = render_psirt_html(payload)
     except Exception as exc:
         html_error = str(exc)
 
-    # --- Return a compact summary dict ---
     from collections import Counter
     verdict_counts = dict(Counter(f["verdict"] for f in payload.get("findings", [])))
     return {
@@ -263,8 +275,7 @@ def assess_fleet_exposure(advisory: dict[str, Any], output_dir: str = "") -> dic
         "warnings": payload.get("warnings", []),
         "total_findings": len(payload.get("findings", [])),
         "verdict_counts": verdict_counts,
-        "assessment_json": str(json_path),
-        "html_report": str(html_path) if html_path else None,
+        "html_content": html_content,
         "html_error": html_error,
         "plan_type": "psirt_advisory",
     }
@@ -277,39 +288,28 @@ def assess_fleet_exposure(advisory: dict[str, Any], output_dir: str = "") -> dic
 @mcp.tool()
 def render_psirt_report(
     assessment: dict[str, Any] | None = None,
-    assessment_path: str = "",
-    output_dir: str = "",
 ) -> dict:
     """
-    Render a PsirtAssessment to an HTML report.
+    Render a PsirtAssessment dict to an HTML string.
 
-    For large fleets, pass assessment_path (the assessment.json path returned
-    by assess_fleet_exposure) instead of the full assessment dict — this avoids
-    relaying a large payload through the model context.
+    Returns html_content (the full HTML as a string) so the calling Claude Code
+    session can write it to a local path on the workstation using its Write tool.
+    Use this when assess_fleet_exposure returned html_error and you need to retry.
 
     Parameters
     ----------
-    assessment      : dict — inline assessment dict (small fleets / re-render).
-    assessment_path : str  — path to assessment.json saved by assess_fleet_exposure.
-                      Takes precedence over assessment if both are provided.
-    output_dir      : str  — base output directory; defaults to PSIRT/ next to
-                      the repo root (same default as assess_fleet_exposure).
+    assessment : dict — inline assessment dict as returned by assess_fleet_exposure's
+                 payload structure (must include advisory, findings, priority, etc.).
     """
-    import json
+    import json  # noqa: F401 — kept for consistency; payload may be a dict or str
 
     sys.path.insert(0, str(_REPO_ROOT / "scripts"))
     from render_report import PayloadError, render_psirt_html, validate_psirt_payload
 
-    if assessment_path:
-        p = Path(assessment_path).expanduser()
-        if not p.exists():
-            return {"error": f"assessment_path not found: {assessment_path!r}"}
-        payload = json.loads(p.read_text(encoding="utf-8"))
-    elif assessment is not None:
-        payload = dict(assessment)
-    else:
-        return {"error": "provide either assessment or assessment_path"}
+    if assessment is None:
+        return {"error": "assessment dict is required"}
 
+    payload = dict(assessment)
     payload.setdefault("plan_type", "psirt_advisory")
 
     try:
@@ -317,17 +317,10 @@ def render_psirt_report(
     except PayloadError as exc:
         return {"error": str(exc)}
 
+    try:
+        html_content = render_psirt_html(payload)
+    except Exception as exc:
+        return {"error": f"render failed: {exc}"}
+
     advisory_id = payload.get("advisory", {}).get("advisory_id", "") or "unknown-advisory"
-    if not re.match(r'^[A-Za-z0-9._-]+$', advisory_id):
-        return {"error": f"advisory_id contains invalid characters: {advisory_id!r} (allowed: A-Z a-z 0-9 . _ -)"}
-    base = Path(output_dir).expanduser() if output_dir else (_REPO_ROOT / "PSIRT")
-    outdir = (base / advisory_id).resolve()
-    if not outdir.is_relative_to(base.resolve()):
-        return {"error": f"advisory_id would escape output directory: {advisory_id!r}"}
-    outdir.mkdir(parents=True, exist_ok=True)
-
-    html = render_psirt_html(payload)
-    html_path = outdir / f"{advisory_id}.html"
-    html_path.write_text(html, encoding="utf-8")
-
-    return {"html_path": str(html_path)}
+    return {"html_content": html_content, "advisory_id": advisory_id}
