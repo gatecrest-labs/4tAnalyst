@@ -133,7 +133,7 @@ def test_get_central_dnat_blocked_by_adom_guard():
 
 def test_get_central_snat_returns_empty_on_object_not_found():
     """get_central_snat_rules returns [] when FortiManager returns code=-9 (object not found)."""
-    from fortimanager_mcp.client import FortiManagerClient, FortiManagerAPIError
+    from fortimanager_mcp.client import FortiManagerAPIError, FortiManagerClient
 
     c = FortiManagerClient(primary_host="h", primary_key="k")
 

@@ -692,8 +692,8 @@ def _service_append_alternative(
     Returns the most address-specific qualifying candidate (highest non-'all' ref count),
     or None if no such rule exists.
     """
-    from planner.insertion import _intf_scoped
     from fortimanager_mcp.matching import WILDCARD_RANGE
+    from planner.insertion import _intf_scoped
 
     best: ServiceAppendAlternative | None = None
     best_score = -1

@@ -17,6 +17,7 @@ from __future__ import annotations
 import ipaddress
 from dataclasses import dataclass
 
+
 def _is_wildcard(pr: "PortRange") -> bool:
     """True only for WILDCARD_RANGE (ip 0-65535), not specific ip/N protocols."""
     return pr.protocol == "ip" and pr.start == 0 and pr.end == 65535

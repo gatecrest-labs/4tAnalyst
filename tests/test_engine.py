@@ -1160,9 +1160,9 @@ def test_plan_change_rejects_fqdn_dst():
 # _service_object_plan — unit tests for specific IP protocol handling
 # ---------------------------------------------------------------------------
 
+from fortimanager_mcp.matching import AddressCatalog, ServiceCatalog
 from planner.engine import _service_object_plan
 from planner.fetch import DeviceSnapshot
-from fortimanager_mcp.matching import AddressCatalog, ServiceCatalog
 
 
 @pytest.fixture
@@ -1181,7 +1181,7 @@ def fake_snapshot():
 
 def test_service_plan_ip47_reuses_named_gre_object(fake_snapshot):
     """When a GRE named object exists in the service catalog, reuse it."""
-    from fortimanager_mcp.matching import PortRange, ServiceCatalog
+    from fortimanager_mcp.matching import ServiceCatalog
     gre_obj = {"name": "GRE-CS", "protocol": "IP", "protocol-number": 47}
     fake_snapshot.svc_catalog = ServiceCatalog([gre_obj], [])
     plan = _service_object_plan("ip/47", fake_snapshot)
@@ -1349,8 +1349,8 @@ def test_group_append_alternative_skips_negated_source_side():
 
 def _minimal_change_plan(fw):
     """Build a minimal ChangePlan wrapping a single FirewallPlan for payload tests."""
-    from planner.models import ChangePlan, NormalizedFlow
     from fortimanager_mcp.matching import PortRange as PR
+    from planner.models import ChangePlan, NormalizedFlow
     return ChangePlan(
         ticket_id="TEST-001",
         flow=NormalizedFlow(src="1.1.1.1", dst="2.2.2.2", service="ip/47",
