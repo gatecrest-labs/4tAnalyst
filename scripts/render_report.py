@@ -68,6 +68,25 @@ def validate_fqdn_payload(data: dict) -> None:
         raise PayloadError("payload['per_firewall'] must be a list")
 
 
+PSIRT_REQUIRED_KEYS = {
+    "plan_type", "advisory", "findings", "priority", "priority_rationale",
+}
+
+
+def validate_psirt_payload(data: dict) -> None:
+    if not isinstance(data, dict):
+        raise PayloadError("PSIRT payload must be a JSON object")
+    if data.get("plan_type") != "psirt_advisory":
+        raise PayloadError("payload['plan_type'] must be 'psirt_advisory'")
+    missing = PSIRT_REQUIRED_KEYS - data.keys()
+    if missing:
+        raise PayloadError(f"PSIRT payload missing required keys: {sorted(missing)}")
+    if not isinstance(data["findings"], list):
+        raise PayloadError("payload['findings'] must be a list")
+    if not isinstance(data["advisory"], dict):
+        raise PayloadError("payload['advisory'] must be an object")
+
+
 def output_dir_name(data: dict) -> str:
     ticket_id = data.get("ticket_id")
     if ticket_id:
@@ -707,6 +726,159 @@ th{{background:#f8f8f8}}
 </body></html>"""
 
 
+_PSIRT_VERDICT_LABELS = {
+    "no_action": "No changes required",
+    "config_change_required": "Configuration change required",
+    "upgrade_required": "Upgrade required",
+    "unknown_needs_manual_check": "Needs manual check (degraded data)",
+}
+_PSIRT_VERDICT_CLASSES = {
+    "no_action": "verdict-allowed",
+    "config_change_required": "verdict-blocked",
+    "upgrade_required": "verdict-blocked",
+    "unknown_needs_manual_check": "verdict-unknown",
+}
+_PSIRT_PRIORITY_CLASSES = {
+    "critical": "verdict-blocked", "high": "verdict-blocked",
+    "medium": "verdict-unknown", "low": "verdict-allowed",
+    "informational": "verdict-allowed",
+}
+
+
+def render_psirt_html(
+    data: dict,
+    generated_at: str = "",
+    model: str = "",
+    cost_usd: str = "",
+) -> str:
+    """Render a PSIRT advisory assessment as an HTML report."""
+    adv = data.get("advisory", {})
+    advisory_id = esc(adv.get("advisory_id", ""))
+    advisory_url = esc(adv.get("advisory_url", ""))
+    cve_ids = ", ".join(esc(c) for c in adv.get("cve_ids", []))
+    priority = data.get("priority", "")
+    priority_cls = _PSIRT_PRIORITY_CLASSES.get(priority, "verdict-unknown")
+
+    range_rows = "".join(
+        f"<tr><td>{esc(r.get('product',''))}</td>"
+        f"<td>{esc(r.get('min_version','')) or '(any)'} – {esc(r.get('max_version','')) or '(any)'}</td>"
+        f"<td>{esc(r.get('fixed_version',''))}</td>"
+        f"<td>{esc(r.get('notes',''))}</td></tr>"
+        for r in adv.get("affected_ranges", [])
+    )
+
+    finding_rows = "".join(
+        f"<tr><td><code>{esc(f.get('device',''))}</code></td>"
+        f"<td>{esc(f.get('adom',''))}</td>"
+        f"<td>{esc(f.get('product',''))}</td>"
+        f"<td>{esc(f.get('current_version',''))}</td>"
+        f"<td>{'Yes' if f.get('in_range') else 'No'}</td>"
+        f"<td>{esc(f.get('workaround_status',''))}</td>"
+        f"<td><span class=\"badge {_PSIRT_VERDICT_CLASSES.get(f.get('verdict',''), 'verdict-unknown')}\">"
+        f"{esc(_PSIRT_VERDICT_LABELS.get(f.get('verdict',''), f.get('verdict','')))}</span></td>"
+        f"<td>{esc(f.get('reason',''))}</td></tr>"
+        for f in data.get("findings", [])
+    )
+
+    out_of_scope = data.get("out_of_scope_products", [])
+    warnings = data.get("warnings", [])
+    meta_line = _render_meta_line(generated_at, model, cost_usd)
+
+    out_of_scope_section = ""
+    if out_of_scope:
+        out_of_scope_section = (
+            '<section class="section">'
+            "<h2>Out of Scope Products</h2>"
+            "<p>Mentioned in the advisory but not matched by this tool — review manually: "
+            + ", ".join(esc(p) for p in out_of_scope)
+            + "</p></section>"
+        )
+
+    warnings_block = ""
+    if warnings:
+        warnings_block = (
+            '<div class="warnings"><strong>Warnings:</strong><ul>'
+            + "".join(f"<li>{esc(w)}</li>" for w in warnings)
+            + "</ul></div>"
+        )
+
+    kev_badge = (
+        ' &nbsp;<span class="badge verdict-blocked">KEV-LISTED</span>'
+        if data.get("kev_hit")
+        else ""
+    )
+
+    exploitation_note = ""
+    if adv.get("exploited_in_wild_text"):
+        exploitation_note = (
+            f'<p><strong>Fortinet exploitation notes:</strong> '
+            f'{esc(adv.get("exploited_in_wild_text",""))}</p>'
+        )
+
+    workaround_note = ""
+    if adv.get("workaround_text"):
+        workaround_note = (
+            f'<p><strong>Workaround:</strong> {esc(adv.get("workaround_text",""))}</p>'
+        )
+
+    return f"""<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8">
+<title>PSIRT Assessment: {advisory_id}</title>
+<style>
+body{{font-family:sans-serif;max-width:1200px;margin:2em auto;padding:0 1em}}
+code{{background:#f4f4f4;padding:2px 4px;border-radius:3px}}
+table{{border-collapse:collapse;width:100%}}
+th,td{{border:1px solid #ddd;padding:6px 10px;text-align:left}}
+th{{background:#f8f8f8}}
+.verdict-allowed{{background:#d4edda;color:#155724;padding:2px 8px;border-radius:4px}}
+.verdict-blocked{{background:#f8d7da;color:#721c24;padding:2px 8px;border-radius:4px}}
+.verdict-unknown{{background:#fff3cd;color:#856404;padding:2px 8px;border-radius:4px}}
+.warnings{{background:#fff3cd;border-left:4px solid #ffc107;padding:0.5em 1em;margin:1em 0}}
+.section{{border:1px solid #ddd;border-radius:6px;padding:1.5em;margin:1.5em 0}}
+</style>
+</head><body>
+<h1>PSIRT Advisory Assessment</h1>
+<p><strong>Advisory:</strong> <code>{advisory_id}</code>
+   &nbsp;<a href="{advisory_url}">{advisory_url}</a></p>
+<p><strong>CVE(s):</strong> {cve_ids}
+   &nbsp; <strong>Fortinet severity:</strong> {esc(adv.get('fortinet_severity',''))}
+   &nbsp; <strong>CVSS:</strong> {esc(str(adv.get('cvss_score','')))}</p>
+<p>{esc(adv.get('description',''))}</p>
+{f'<p class="meta">{meta_line}</p>' if meta_line else ''}
+
+<section class="section">
+  <h2>Priority: <span class="badge {priority_cls}">{esc(priority.upper())}</span>{kev_badge}
+  </h2>
+  <p>{esc(data.get('priority_rationale',''))}</p>
+  {exploitation_note}
+</section>
+
+{warnings_block}
+
+<section class="section">
+  <h2>Affected Version Ranges</h2>
+  <table>
+    <thead><tr><th>Product</th><th>Range</th><th>Fixed in</th><th>Notes</th></tr></thead>
+    <tbody>{range_rows}</tbody>
+  </table>
+</section>
+
+<section class="section">
+  <h2>Fleet Findings</h2>
+  {workaround_note}
+  <table>
+    <thead><tr><th>Device</th><th>ADOM</th><th>Product</th><th>Version</th>
+      <th>In Range</th><th>Workaround</th><th>Verdict</th><th>Reason</th></tr></thead>
+    <tbody>{finding_rows}</tbody>
+  </table>
+</section>
+
+{out_of_scope_section}
+
+<footer>Generated by scripts/render_report.py from an /analyze-psirt assessment.</footer>
+</body></html>"""
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", required=True, help="Path to the JSON payload")
@@ -726,6 +898,7 @@ def main(argv: list[str] | None = None) -> int:
 
     plan_type = data.get("plan_type", "ip_change")
     generated_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    conf = None
     try:
         if plan_type == "fqdn_allowlist":
             validate_fqdn_payload(data)
@@ -734,6 +907,12 @@ def main(argv: list[str] | None = None) -> int:
                 model=args.model, cost_usd=args.cost_usd,
             )
             conf = render_fqdn_conf(data)
+        elif plan_type == "psirt_advisory":
+            validate_psirt_payload(data)
+            html = render_psirt_html(
+                data, generated_at=generated_at,
+                model=args.model, cost_usd=args.cost_usd,
+            )
         else:
             validate_payload(data)
             html = render_html(
@@ -750,15 +929,16 @@ def main(argv: list[str] | None = None) -> int:
     outdir.mkdir(parents=True, exist_ok=True)
 
     html_path = outdir / f"report-{folder_name}.html"
-    conf_path = outdir / "implementation.conf"
     data_path = outdir / "payload.json"
 
     html_path.write_text(html, encoding="utf-8")
-    conf_path.write_text(conf, encoding="utf-8")
+    if conf is not None:
+        conf_path = outdir / "implementation.conf"
+        conf_path.write_text(conf, encoding="utf-8")
+        print(str(conf_path))
     data_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
     print(str(html_path))
-    print(str(conf_path))
     return 0
 
 

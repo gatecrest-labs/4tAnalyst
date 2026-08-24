@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "psirt"
+version = "0.1.0"
+description = "Deterministic PSIRT advisory assessment — matches Fortinet advisories against fleet firmware/config, no LLM"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.28.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["psirt"]

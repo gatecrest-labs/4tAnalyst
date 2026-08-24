@@ -22,103 +22,6 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# fgplanner client wiring
-# ---------------------------------------------------------------------------
-#
-# fgplanner ships no default clients and reads no credentials file (see
-# fgplanner/clients.py) — callers must register zero-argument factories that
-# build a FortiManagerClient / ZonePolicyClient from this repo's own
-# credentials.yaml. This mirrors the deleted planner/engine.py
-# _default_fmg_client()/_default_zone_client() helpers. Registration is
-# idempotent (it's just an assignment) and happens lazily inside
-# plan_change() below, since that's the one code path guaranteed to run
-# regardless of entry point (stdio, HTTP, or a raw import).
-
-def _load_credentials() -> dict:
-    import os
-    from pathlib import Path
-
-    import yaml
-
-    repo_root = Path(__file__).parent.parent
-    creds_path = Path(os.getenv("CREDENTIALS_FILE", str(repo_root / "credentials.yaml")))
-    if creds_path.exists():
-        with open(creds_path, encoding="utf-8") as fh:
-            return yaml.safe_load(fh) or {}
-    return {}
-
-
-def _build_fmg_client():
-    from fgplanner.models import PlannerDataError
-
-    from fortimanager_mcp.client import FortiManagerClient
-
-    cfg = _load_credentials().get("fortimanager", {})
-    hosts = [(h.get("host", ""), h.get("api_key", "")) for h in cfg.get("hosts", [])]
-    hosts = [(h, k) for h, k in hosts if h and k]
-    if not hosts:
-        raise PlannerDataError("credentials", "fortimanager.hosts is empty in credentials.yaml")
-    primary = hosts[0]
-    secondary = hosts[1] if len(hosts) > 1 else ("", "")
-    client = FortiManagerClient(
-        primary_host=primary[0], primary_key=primary[1],
-        secondary_host=secondary[0], secondary_key=secondary[1],
-        port=int(cfg.get("port", 443)),
-        verify_ssl=bool(cfg.get("verify_ssl", True)),
-        version=str(cfg.get("version", "7.4")),
-    )
-    client.login()
-    return client
-
-
-def _build_zone_client():
-    from fgplanner.models import PlannerDataError
-
-    from zone_mcp.client import ZonePolicyClient
-
-    cfg = _load_credentials().get("zone_policy", {})
-    if not cfg.get("base_url") or not cfg.get("token"):
-        raise PlannerDataError("credentials", "zone_policy.base_url/token missing in credentials.yaml")
-    return ZonePolicyClient(
-        base_url=cfg["base_url"],
-        token=cfg["token"],
-        verify_ssl=bool(cfg.get("verify_ssl", False)),
-        timeout=float(cfg.get("timeout", 30.0)),
-    )
-
-
-def _register_fgplanner_clients() -> None:
-    """Register fwanalyst_server's client factories with fgplanner.
-
-    Safe to call repeatedly — registration is just an assignment, and the
-    factories aren't invoked until plan_change() actually needs a client, so
-    there's no I/O cost to calling this on every plan_change() invocation.
-    """
-    from fgplanner.clients import (
-        register_fmg_client_factory,
-        register_zone_client_factory,
-    )
-
-    register_fmg_client_factory(_build_fmg_client)
-    register_zone_client_factory(_build_zone_client)
-
-
-mcp = FastMCP(
-    name="fw-analyst",
-    instructions=(
-        "4tAnalyst unified server. For firewall change requests, prefer the "
-        "plan_change tool: it computes the zone verdict, existing-rule "
-        "coverage, object reuse, rule insertion point, and FortiGate CLI "
-        "deterministically — relay its output verbatim, never recompute or "
-        "edit it. The other tools are read-only lookups for ad-hoc questions. "
-        "zone_* tools query the live 4THealth API (authoritative for "
-        "verdicts); standards check_traffic uses static TUFIN-era data — do "
-        "not use it for verdicts."
-    ),
-)
-
-
-# ---------------------------------------------------------------------------
 # Access logging
 # ---------------------------------------------------------------------------
 
@@ -136,6 +39,21 @@ def _logged(fn):
         return fn(*args, **kwargs)
 
     return wrapper
+
+
+mcp = FastMCP(
+    name="fw-analyst",
+    instructions=(
+        "4tAnalyst unified server. For firewall change requests, prefer the "
+        "plan_change tool: it computes the zone verdict, existing-rule "
+        "coverage, object reuse, rule insertion point, and FortiGate CLI "
+        "deterministically — relay its output verbatim, never recompute or "
+        "edit it. The other tools are read-only lookups for ad-hoc questions. "
+        "zone_* tools query the live 4THealth API (authoritative for "
+        "verdicts); standards check_traffic uses static TUFIN-era data — do "
+        "not use it for verdicts."
+    ),
+)
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +91,7 @@ def plan_change(
     service       : Port(s), proto/port, or well-known names, comma-separated
                     ("443", "tcp/8443, tcp/22", "ssh")
     firewalls     : Target firewalls as "DEVICE:ADOM" strings
-                    (e.g. ["SITE01-FW01:OT-ADOM"]). The engineer names these;
+                    (e.g. ["MNHQ-FW01:OT-ADOM"]). The engineer names these;
                     path is never auto-discovered.
     justification : Business justification from the request
     ticket_id     : Change ticket ID if known
@@ -190,11 +108,9 @@ def plan_change(
     verdicts, rename objects, or edit CLI text. If warnings mention degraded
     FortiManager data, lead with that when presenting.
     """
-    from fgplanner.engine import plan_change as _plan
-    from fgplanner.engine import to_report_payload
-    from fgplanner.models import PlannerDataError, TargetFirewall
-
-    _register_fgplanner_clients()
+    from planner.engine import plan_change as _plan
+    from planner.engine import to_report_payload
+    from planner.models import PlannerDataError, TargetFirewall
 
     targets = []
     for raw in firewalls:
@@ -241,7 +157,7 @@ def plan_fqdn_change(
 
     Parameters
     ----------
-    src_ip      : Source IP/CIDR, 'any'/'all', or a FortiGate address object name
+    src_ip      : Source IP/CIDR for the rule
     vendor      : Vendor name (e.g. "Apple") — used in address group naming
     category    : Vendor category (e.g. "APNs") — used in address group naming
     ticket_id   : Change ticket ID (e.g. CHG0012345)
@@ -304,6 +220,7 @@ def _register_existing_tools() -> None:
     from feedback_mcp import server as feedback
     from fortimanager_mcp import server as fmg
     from intake_mcp import server as intake
+    from psirt_mcp import server as psirt
     from standards_mcp import server as standards
     from zone_mcp import server as zone
 
@@ -350,6 +267,10 @@ def _register_existing_tools() -> None:
         zone.get_policies,
         zone.find_zone_for_ip,
         zone.check_ip_traffic,
+        # psirt advisory assessment
+        psirt.parse_advisory,
+        psirt.assess_fleet_exposure,
+        psirt.render_psirt_report,
     ):
         mcp.add_tool(_logged(fn), annotations=_ANNOTATIONS.get(
             fn.__name__, ToolAnnotations(readOnlyHint=True)))
