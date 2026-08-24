@@ -125,30 +125,32 @@ def test_assess_degraded_adom_query_marks_devices_unknown():
     assert result.priority == "unknown"
 
 
-def test_device_firmware_4part_strips_build_number():
-    # FortiManager returns os_ver="7.0" (major.minor), mr=4 (patch), patch=11 (build)
-    assert _device_firmware({"os_ver": "7.0", "mr": 4, "patch": 11}) == "7.0.4"
+def test_device_firmware_fmg_branch_suffix_stripped():
+    # FortiManager returns os_ver="7.0" where ".0" is a branch suffix, NOT the
+    # minor version. mr=4 is the minor, patch=11 is the patch → 7.4.11.
+    assert _device_firmware({"os_ver": "7.0", "mr": 4, "patch": 11}) == "7.4.11"
 
 
-def test_device_firmware_negative_build_stops_at_patch():
-    # patch=-1 means "GA build" in FortiManager — strip and return MAJOR.MINOR.PATCH
-    assert _device_firmware({"os_ver": "7.0", "mr": 4, "patch": -1}) == "7.0.4"
+def test_device_firmware_negative_patch_returns_empty():
+    # patch=-1 means no specific patch tracked — treat as unknown.
+    assert _device_firmware({"os_ver": "7.0", "mr": 4, "patch": -1}) == ""
 
 
-def test_device_firmware_3part_unchanged():
-    # Normal 3-field case (os_ver = major only) still works
+def test_device_firmware_os_ver_major_only():
+    # os_ver as plain integer string (no branch suffix) also works.
     assert _device_firmware({"os_ver": "7", "mr": 4, "patch": 2}) == "7.4.2"
 
 
-def test_assess_4part_version_devices_are_correctly_evaluated():
-    # Devices returning 4-part versions (os_ver="7.0", mr=4, patch=11) must be
-    # evaluated against advisory ranges, not routed to unknown_needs_manual_check.
+def test_assess_fmg_branch_suffix_version_correctly_evaluated():
+    # Devices with os_ver="7.0" (branch suffix format) must produce the correct
+    # 3-part version for range matching, not route to unknown_needs_manual_check.
+    # Advisory affects 7.4.0-7.4.4; device is 7.4.11 → no_action.
     client = FakeFMGClient(devices_by_adom={
         "OT-ADOM": [{"name": "FW01", "os_ver": "7.0", "mr": 4, "patch": 11}],
     })
     result = assess(_advisory(), client, _FakeHTTPClient(), kev_url="")
-    assert result.findings[0].current_version == "7.0.4"
-    assert result.findings[0].verdict != "unknown_needs_manual_check"
+    assert result.findings[0].current_version == "7.4.11"
+    assert result.findings[0].verdict == "no_action"
 
 
 def test_assess_matches_fortimanager_itself_against_advisory():

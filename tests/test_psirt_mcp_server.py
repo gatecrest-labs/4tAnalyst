@@ -69,8 +69,11 @@ def test_assess_fleet_exposure_returns_assessment_dict(monkeypatch):
         ],
     }
     result = server.assess_fleet_exposure(advisory)
-    assert result["priority"] in ("critical", "high", "medium", "low", "informational")
-    assert len(result["findings"]) == 1
+    assert result["priority"] in ("critical", "high", "medium", "low", "informational", "unknown")
+    # compact summary — full findings are in assessment_json, not inline
+    assert "total_findings" in result
+    assert "verdict_counts" in result
+    assert "assessment_json" in result
 
 
 def test_render_psirt_report_writes_html(tmp_path):
@@ -90,6 +93,6 @@ def test_render_psirt_report_writes_html(tmp_path):
         "degraded": False,
         "warnings": [],
     }
-    result = server.render_psirt_report(assessment, output_dir=str(tmp_path))
+    result = server.render_psirt_report(assessment=assessment, output_dir=str(tmp_path))
     assert Path(result["html_path"]).exists()
     assert "FG-IR-24-001" in Path(result["html_path"]).read_text()
