@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -247,7 +248,10 @@ def assess_fleet_exposure(advisory: dict[str, Any]) -> dict:
     fmg_client = _build_fmg_client()
     extra_fmg = _build_extra_fmg_clients()
     http_client = _build_http_client()
-    result = assess(adv, fmg_client, http_client, kev_url, extra_fmg_clients=extra_fmg)
+    workaround_timeout = float(cfg.get("workaround_check_timeout", 90))
+    deadline = time.monotonic() + workaround_timeout if workaround_timeout > 0 else None
+    result = assess(adv, fmg_client, http_client, kev_url, extra_fmg_clients=extra_fmg,
+                    workaround_check_deadline=deadline)
     payload = result.to_dict()
     payload["plan_type"] = "psirt_advisory"
 
