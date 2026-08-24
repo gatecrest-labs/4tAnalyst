@@ -1256,6 +1256,49 @@ def _fake_fmg_with_both_gaps():
     return fmg
 
 
+def _fake_fmg_with_negated_dst_rule():
+    """Fake FMG with rule 99999 that covers src and service but has dstaddr-negate:enable.
+
+    The rule is a 'catch-all except these destinations' style policy.  It should
+    not appear as an Option B candidate even though the source and service match.
+    """
+    policies = [
+        {"policyid": 99999, "name": "Wind Farms catch-all",
+         "status": "enable", "action": 1, "schedule": ["always"],
+         "srcaddr": ["H_GE_SRC"], "dstaddr": ["H_GE_DST"],
+         "dstaddr-negate": "enable",
+         "service": ["HTTPS"],
+         "srcintf": ["any"], "dstintf": ["any"], "logtraffic": 2},
+    ]
+    fmg = EngineFMG(policies=policies)
+    base = fmg.get_address_objects("root")
+    fmg.get_devices = lambda adom: [{"name": "FW01"}]
+    fmg.get_policy_packages = lambda adom: [
+        {"name": "pkgA", "scope member": [{"name": "FW01"}]}
+    ]
+    fmg.get_address_objects = lambda adom: base + [
+        {"name": "H_GE_SRC", "type": "ipmask", "subnet": "10.1.2.3/32"},
+        {"name": "H_GE_DST", "type": "ipmask", "subnet": "10.9.8.7/32"},
+    ]
+    return fmg
+
+
+def test_group_append_alternative_skips_negated_destination_rule():
+    """A rule with dstaddr-negate:enable must not be suggested as Option B."""
+    fmg = _fake_fmg_with_negated_dst_rule()
+    zc = EngineZone(verdict="ALLOWED")
+    plan = plan_change(
+        src="10.1.2.3", dst="10.9.8.7",
+        service="tcp/443",
+        firewalls=[TF(device="FW01", adom="TEST-ADOM")],
+        ticket_id="RITM-NEGATE",
+        fmg_client=fmg, zone_client=zc,
+    )
+    fw = plan.firewalls[0]
+    # The negated-dst rule qualifies by address/service but must be excluded
+    assert fw.alternative is None or fw.alternative.policy_id != 99999
+
+
 def _minimal_change_plan(fw):
     """Build a minimal ChangePlan wrapping a single FirewallPlan for payload tests."""
     from planner.models import ChangePlan, NormalizedFlow
