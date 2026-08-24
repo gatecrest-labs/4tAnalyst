@@ -26,32 +26,28 @@ _SUPPORTED_PRODUCTS = {"fortios", "fortigate", "fortimanager"}
 
 
 def _device_firmware(device: dict) -> str:
-    os_ver = str(device.get("os_ver", "")).strip()
-    mr = str(device.get("mr", "")).strip()
-    patch = str(device.get("patch", "")).strip()
-    if not os_ver or not mr or not patch:
-        return ""  # incomplete version → treat as unknown
-    # FortiManager may return os_ver as "MAJOR.MINOR" (e.g. "7.0") rather than
-    # just "MAJOR", making the assembled string 4 parts: "7.0.4.11". Advisory
-    # ranges are always 3-part (MAJOR.MINOR.PATCH), so normalise to the first
-    # three non-negative integer components and drop the build number.
-    # A negative component (-1 = no build applied) stops the walk; anything
-    # before it is still usable.
-    raw = f"{os_ver}.{mr}.{patch}"
-    parts: list[int] = []
-    for seg in raw.split("."):
-        try:
-            val = int(seg)
-        except ValueError:
-            break
-        if val < 0:
-            break  # -1 build marker — stop, keep what we have
-        parts.append(val)
-        if len(parts) == 3:
-            break
-    if len(parts) < 3:
-        return ""  # not enough components → treat as unknown
-    return ".".join(str(p) for p in parts)
+    # FortiManager stores versions across three fields:
+    #   os_ver  — major version, sometimes returned as "7.0" where the trailing
+    #             ".0" is a legacy branch suffix, NOT the minor release.
+    #             Take only the leading integer.
+    #   mr      — the actual minor/feature release (e.g. 4 for FortiOS 7.4.x)
+    #   patch   — the patch level (e.g. 11 for 7.4.11); -1 means no specific
+    #             patch is tracked, treat as unknown.
+    os_ver_raw = str(device.get("os_ver", "")).strip()
+    major_str = os_ver_raw.split(".")[0] if os_ver_raw else ""
+    mr_str = str(device.get("mr", "")).strip()
+    patch_str = str(device.get("patch", "")).strip()
+    if not major_str or not mr_str or not patch_str:
+        return ""  # incomplete → treat as unknown
+    try:
+        major = int(major_str)
+        mr = int(mr_str)
+        patch = int(patch_str)
+    except ValueError:
+        return ""
+    if patch < 0:
+        return ""  # -1 = no patch tracked → treat as unknown
+    return f"{major}.{mr}.{patch}"
 
 
 def _evaluate_device(
