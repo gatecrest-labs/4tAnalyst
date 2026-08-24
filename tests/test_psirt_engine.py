@@ -8,6 +8,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+import time
+
 from psirt.engine import _device_firmware, _fmg_version, assess
 from psirt.models import Advisory, AffectedRange
 
@@ -227,6 +229,39 @@ def test_assess_checks_primary_and_backup_fmg():
     backup_f = next(f for f in fmg_findings if "backup" in f.device)
     assert primary_f.verdict == "no_action"
     assert backup_f.verdict == "upgrade_required"
+
+
+def test_assess_workaround_deadline_exceeded_skips_api_calls():
+    """When the workaround check deadline is already past, no per-device API
+    calls are made; devices are marked manual_verification_required and the
+    assessment is flagged degraded with a warning."""
+    adv = _advisory()
+    adv.workaround_text = "Disable HTTPS admin access on all interfaces"
+
+    call_log = []
+
+    class _CountingClient(FakeFMGClient):
+        def get_device_interface_config(self, device, vlanids=None, name=None):
+            call_log.append(device)
+            return [{"name": "port1", "allowaccess": ["https"]}]
+
+    client = _CountingClient(devices_by_adom={
+        "OT-ADOM": [
+            {"name": "FW01", "os_ver": "7", "mr": 4, "patch": 2},
+            {"name": "FW02", "os_ver": "7", "mr": 4, "patch": 3},
+        ],
+    })
+    # Deadline already in the past — budget exceeded immediately
+    result = assess(adv, client, _FakeHTTPClient(), kev_url="",
+                    workaround_check_deadline=time.monotonic() - 1.0)
+
+    assert not call_log, "No API calls should be made when budget is already exceeded"
+    fortios_findings = [f for f in result.findings if f.product == "FortiOS"]
+    assert all(f.in_range for f in fortios_findings)
+    assert all(f.workaround_status == "manual_verification_required" for f in fortios_findings)
+    assert all(f.verdict == "config_change_required" for f in fortios_findings)
+    assert result.degraded is True
+    assert any("budget" in w.lower() or "time" in w.lower() for w in result.warnings)
 
 
 def test_assess_unreachable_backup_marks_degraded():
