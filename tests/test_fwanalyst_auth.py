@@ -85,7 +85,7 @@ def test_unified_server_aggregates_all_tools():
     for expected in ("check_ip_traffic", "search_policies", "record_feedback",
                      "parse_spreadsheet_file", "get_naming_convention"):
         assert expected in names, f"missing {expected}"
-    assert len(names) == 39  # 37 aggregated + plan_change + plan_fqdn_change
+    assert len(names) == 42  # 37 aggregated + plan_change + plan_fqdn_change + 3 psirt tools
 
 
 def test_context_module_exports_allowed_adoms_var():

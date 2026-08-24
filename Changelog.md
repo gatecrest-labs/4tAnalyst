@@ -4,6 +4,39 @@ All notable changes to this project are documented here.
 
 ---
 
+## [Unreleased] — 2026-08-24
+
+### Added
+
+#### PSIRT advisory assessment (`psirt/`, `psirt_mcp/`, `.claude/skills/analyze-psirt/`)
+
+New deterministic PSIRT advisory assessment system. Given a Fortinet PSIRT advisory email, the `/analyze-psirt` workflow produces a per-device verdict (no-action / config-change-required / upgrade-required) across the fleet with exploit-aware priority scoring and an HTML report — no auto-remediation, analysis only.
+
+**`psirt/` — deterministic core**
+- `models.py` — `Advisory`, `AffectedRange`, `DeviceFinding`, `PsirtAssessment`, `PsirtDataError` dataclasses, all with `.to_dict()`.
+- `version_match.py` — `parse_version`, `version_in_range`, `compare_versions`. Unparseable version syntax raises `VersionMatchError`, never defaults to "not affected". Missing patch component returns empty string so the device routes to `unknown_needs_manual_check` rather than silently padding to `.0`.
+- `scoring.py` — `compute_priority(cvss_score, fortinet_severity, exploited_in_wild_text, kev_hit, any_device_in_range)`. CVSS bands: ≥9.0→critical, ≥7.0→high, ≥4.0→medium, else→low. KEV hit or non-empty exploitation text forces ≥high. Zero in-range devices → informational; degraded scan with no successfully-checked devices → unknown (never claims "nothing to act on" when no devices were actually checked).
+- `workaround_checks.py` — registry mapping advisory workaround text patterns to FortiManager config checks. Currently implements one check: HTTP/HTTPS admin-access interface restriction via `get_device_interface_config`. Returns `manual_verification_required` when zero valid interface dicts are returned (empty config never reads as "workaround applied"). Unrecognized patterns return `manual_verification_required`, never a guessed result.
+- `enrich.py` — best-effort fortiguard.com advisory page fetch + CISA KEV catalog cross-check; never raises, sets `enrichment_degraded` on failure.
+- `engine.py` — `assess(advisory, fmg_client, http_client, kev_url) -> PsirtAssessment`. Iterates ADOMs → devices via FortiManager; evaluates FortiManager itself against FortiManager-product affected ranges. All external calls wrapped in try/except — per-ADOM, per-device, and workaround-check failures degrade gracefully without aborting the assessment.
+
+**`psirt_mcp/` — FastMCP wrapper**
+- `parse_advisory` — validates the calling model's structured extraction (advisory_id, cve_ids, affected_ranges; optional cvss_score coerced to float with error on non-numeric, advisory_id validated against `[A-Za-z0-9._-]+`).
+- `assess_fleet_exposure` — runs `psirt.engine.assess()` against the live fleet; returns `PsirtAssessment` dict with `plan_type: psirt_advisory`.
+- `render_psirt_report` — writes HTML to `output/<advisory_id>/psirt_report.html`; advisory_id validated with regex and `Path.is_relative_to()` to prevent path traversal.
+
+**`scripts/render_report.py`** — extended with `validate_psirt_payload`, `render_psirt_html`; dispatches on `plan_type == "psirt_advisory"`.
+
+**`fwanalyst_server`** — `parse_advisory`, `assess_fleet_exposure`, `render_psirt_report` registered (total tools: 42).
+
+**`credentials.yaml.example`** — added `psirt:` block (`fortiguard_advisory_fetch`, `kev_feed_url`, `fetch_timeout_seconds`).
+
+**`.claude/skills/analyze-psirt/SKILL.md`** — 7-step engineer workflow: extract advisory fields → `parse_advisory` → `assess_fleet_exposure` → `render_psirt_report` → present per-device verdict table.
+
+**Tests** — 52 new tests across `test_psirt_models.py`, `test_psirt_version_match.py`, `test_psirt_scoring.py`, `test_psirt_workaround_checks.py`, `test_psirt_enrich.py`, `test_psirt_engine.py`, `test_render_psirt_report.py`, `test_psirt_mcp_server.py`. Full suite: 446 passing.
+
+---
+
 ## [Unreleased] — 2026-08-09
 
 ### Added
