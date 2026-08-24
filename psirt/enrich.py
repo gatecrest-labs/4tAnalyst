@@ -21,7 +21,7 @@ _CVSS_RE = re.compile(r"CVSS\s*Score:?\s*([\d.]+)", re.IGNORECASE)
 _SEVERITY_RE = re.compile(r"Severity:?\s*(Critical|High|Medium|Low)", re.IGNORECASE)
 
 
-def check_kev(cve_ids: list[str], http_client: Any, kev_url: str, timeout: float = 15.0) -> bool:
+def check_kev(cve_ids: list[str], http_client: Any, kev_url: str, timeout: float = 5.0) -> bool:
     """
     Check if any CVE in cve_ids appears in the CISA Known Exploited
     Vulnerabilities catalog.
@@ -51,7 +51,7 @@ def check_kev(cve_ids: list[str], http_client: Any, kev_url: str, timeout: float
     return any(cve in known for cve in cve_ids)
 
 
-def fetch_advisory_page(advisory_url: str, http_client: Any, timeout: float = 15.0) -> dict:
+def fetch_advisory_page(advisory_url: str, http_client: Any, timeout: float = 5.0) -> dict:
     """
     Fetch the fortiguard.com advisory page and extract CVSS score and severity.
 
@@ -89,7 +89,7 @@ def fetch_advisory_page(advisory_url: str, http_client: Any, timeout: float = 15
     }
 
 
-def enrich_advisory(advisory: Advisory, http_client: Any, kev_url: str, timeout: float = 15.0) -> Advisory:
+def enrich_advisory(advisory: Advisory, http_client: Any, kev_url: str, timeout: float = 5.0) -> Advisory:
     """
     Enrich an Advisory from fortiguard.com and CISA KEV catalog.
 

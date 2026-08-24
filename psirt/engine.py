@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
+import time
 from typing import Any
 
 from psirt.enrich import enrich_advisory
@@ -71,6 +72,7 @@ def _evaluate_device(
     product_label: str,
     firmware: str,
     fmg_client: Any,
+    skip_workaround_check: bool = False,
 ) -> DeviceFinding:
     if not firmware:
         return DeviceFinding(
@@ -129,6 +131,18 @@ def _evaluate_device(
             ),
         )
 
+    if skip_workaround_check:
+        return DeviceFinding(
+            device=device_name, adom=adom, product=product_label,
+            current_version=firmware, in_range=True,
+            workaround_status="manual_verification_required",
+            verdict="config_change_required",
+            reason=(
+                f"Firmware {firmware} is affected. Workaround check deferred: "
+                f"fleet scan time budget exceeded. Manual verification required."
+            ),
+        )
+
     try:
         status = check_workaround(pattern_key, fmg_client, adom, device_name)
     except Exception as exc:
@@ -179,6 +193,7 @@ def assess(
     http_client: Any,
     kev_url: str,
     extra_fmg_clients: "list[tuple[str, Any]] | None" = None,
+    workaround_check_deadline: "float | None" = None,
 ) -> PsirtAssessment:
     """
     Main entry point. Enriches the advisory, scans every ADOM/device the
@@ -234,6 +249,7 @@ def assess(
             ))
 
     # Evaluate every FortiGate device in every ADOM.
+    _budget_exceeded = False
     if fortios_ranges:
         try:
             adoms = [a.get("name", "") for a in fmg_client.get_adoms() if isinstance(a, dict)]
@@ -253,8 +269,18 @@ def assess(
                     continue
                 name = d.get("name", "")
                 firmware = _device_firmware(d)
+                if (not _budget_exceeded
+                        and workaround_check_deadline is not None
+                        and time.monotonic() > workaround_check_deadline):
+                    _budget_exceeded = True
+                    degraded = True
+                    warnings.append(
+                        "Workaround verification time budget exceeded; "
+                        "remaining devices marked for manual review."
+                    )
                 findings.append(_evaluate_device(
                     advisory, fortios_ranges, name, adom, "FortiOS", firmware, fmg_client,
+                    skip_workaround_check=_budget_exceeded,
                 ))
 
     any_in_range = any(f.in_range for f in findings)
