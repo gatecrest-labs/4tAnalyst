@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from psirt.engine import assess
+from psirt.engine import _device_firmware, assess
 from psirt.models import Advisory, AffectedRange
 
 
@@ -123,6 +123,32 @@ def test_assess_degraded_adom_query_marks_devices_unknown():
     assert result.degraded is True
     assert any(w for w in result.warnings)
     assert result.priority == "unknown"
+
+
+def test_device_firmware_4part_strips_build_number():
+    # FortiManager returns os_ver="7.0" (major.minor), mr=4 (patch), patch=11 (build)
+    assert _device_firmware({"os_ver": "7.0", "mr": 4, "patch": 11}) == "7.0.4"
+
+
+def test_device_firmware_negative_build_stops_at_patch():
+    # patch=-1 means "GA build" in FortiManager — strip and return MAJOR.MINOR.PATCH
+    assert _device_firmware({"os_ver": "7.0", "mr": 4, "patch": -1}) == "7.0.4"
+
+
+def test_device_firmware_3part_unchanged():
+    # Normal 3-field case (os_ver = major only) still works
+    assert _device_firmware({"os_ver": "7", "mr": 4, "patch": 2}) == "7.4.2"
+
+
+def test_assess_4part_version_devices_are_correctly_evaluated():
+    # Devices returning 4-part versions (os_ver="7.0", mr=4, patch=11) must be
+    # evaluated against advisory ranges, not routed to unknown_needs_manual_check.
+    client = FakeFMGClient(devices_by_adom={
+        "OT-ADOM": [{"name": "FW01", "os_ver": "7.0", "mr": 4, "patch": 11}],
+    })
+    result = assess(_advisory(), client, _FakeHTTPClient(), kev_url="")
+    assert result.findings[0].current_version == "7.0.4"
+    assert result.findings[0].verdict != "unknown_needs_manual_check"
 
 
 def test_assess_matches_fortimanager_itself_against_advisory():
