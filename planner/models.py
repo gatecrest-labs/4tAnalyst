@@ -103,6 +103,22 @@ class GroupAppendAlternative:
 
 
 @dataclass
+class ServiceAppendAlternative:
+    """Option C: amend an existing rule's service list instead of creating a new policy.
+
+    Used when a near-miss rule already covers all address pairs but is missing
+    one or more services. The engineer appends the missing service object(s) to
+    the rule's service list rather than creating a duplicate rule.
+    """
+    package: str
+    policy_id: int
+    policy_name: str
+    services_to_add: list[str]   # service object names to append
+    service_cli: str             # exact FortiGate CLI to run
+    warnings: list[str] = field(default_factory=list)
+
+
+@dataclass
 class FirewallPlan:
     firewall: str
     adom: str
@@ -116,6 +132,7 @@ class FirewallPlan:
     dstintf: str = ""
     insertion: InsertionPlan | None = None
     alternative: GroupAppendAlternative | None = None
+    service_alternative: ServiceAppendAlternative | None = None
     warnings: list[str] = field(default_factory=list)
 
 

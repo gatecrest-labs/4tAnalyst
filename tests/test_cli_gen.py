@@ -180,3 +180,13 @@ def test_ip_protocol_object_cli():
     assert "set protocol IP" in cli
     assert "set protocol-number 47" in cli
     assert cli.startswith("config firewall service custom")
+
+
+def test_policy_svc_append_cli():
+    from planner.cli_gen import policy_svc_append_cli
+    cli = policy_svc_append_cli(110223, ["IP-PROTO-47", "IKE-CS"])
+    assert "edit 110223" in cli
+    assert 'append service "IP-PROTO-47"' in cli
+    assert 'append service "IKE-CS"' in cli
+    assert cli.startswith("config firewall policy")
+    assert cli.strip().endswith("end")
