@@ -1,0 +1,249 @@
+"""
+End-to-end tests for psirt.engine.assess() with a fully faked FortiManager
+client and HTTP client — no live systems.
+"""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from psirt.engine import _device_firmware, _fmg_version, assess
+from psirt.models import Advisory, AffectedRange
+
+
+class FakeFMGClient:
+    def __init__(self, adoms=("OT-ADOM",), devices_by_adom=None, fail_adoms=()):
+        self._adoms = adoms
+        self._devices_by_adom = devices_by_adom or {}
+        self._fail_adoms = set(fail_adoms)
+
+    def get_adoms(self):
+        return [{"name": a} for a in self._adoms]
+
+    def get_devices(self, adom):
+        if adom in self._fail_adoms:
+            raise RuntimeError("FMG timeout")
+        return self._devices_by_adom.get(adom, [])
+
+    def get_system_status(self):
+        return {"Version": "7.4.5", "Host Name": "FMG-SITE-A"}
+
+    def get_device_interface_config(self, device, vlanids=None, name=None):
+        return [{"name": "port1", "allowaccess": ["ping"]}]
+
+
+class _FakeHTTPClient:
+    def get(self, url, timeout=None):
+        class _Resp:
+            status_code = 404
+        return _Resp()
+
+
+def _advisory():
+    return Advisory(
+        advisory_id="FG-IR-24-001",
+        cve_ids=["CVE-2024-12345"],
+        cvss_score=9.8,
+        fortinet_severity="Critical",
+        affected_ranges=[
+            AffectedRange(product="FortiOS", min_version="7.4.0",
+                          max_version="7.4.4", fixed_version="7.4.5"),
+        ],
+        workaround_text="",
+    )
+
+
+def test_assess_flags_in_range_device_as_upgrade_required_with_no_workaround():
+    client = FakeFMGClient(devices_by_adom={
+        "OT-ADOM": [{"name": "FW01", "os_ver": "7", "mr": 4, "patch": 2}],
+    })
+    result = assess(_advisory(), client, _FakeHTTPClient(), kev_url="")
+    assert result.priority == "critical"
+    assert len(result.findings) == 1
+    finding = result.findings[0]
+    assert finding.device == "FW01"
+    assert finding.in_range is True
+    assert finding.verdict == "upgrade_required"
+
+
+def test_assess_out_of_range_device_is_no_action():
+    client = FakeFMGClient(devices_by_adom={
+        "OT-ADOM": [{"name": "FW02", "os_ver": "7", "mr": 6, "patch": 0}],
+    })
+    result = assess(_advisory(), client, _FakeHTTPClient(), kev_url="")
+    finding = result.findings[0]
+    assert finding.in_range is False
+    assert finding.verdict == "no_action"
+
+
+def test_assess_zero_fleet_exposure_is_informational_priority():
+    client = FakeFMGClient(devices_by_adom={
+        "OT-ADOM": [{"name": "FW02", "os_ver": "7", "mr": 6, "patch": 0}],
+    })
+    result = assess(_advisory(), client, _FakeHTTPClient(), kev_url="")
+    assert result.priority == "informational"
+
+
+def test_assess_with_recognized_workaround_and_not_in_place_gives_config_change():
+    adv = _advisory()
+    adv.workaround_text = "Disable HTTPS admin access on all interfaces"
+    client = FakeFMGClient(devices_by_adom={
+        "OT-ADOM": [{"name": "FW01", "os_ver": "7", "mr": 4, "patch": 2}],
+    })
+
+    class _ClientWithHTTPSOpen(FakeFMGClient):
+        def get_device_interface_config(self, device, vlanids=None, name=None):
+            return [{"name": "port1", "allowaccess": ["https"]}]
+
+    client = _ClientWithHTTPSOpen(devices_by_adom={
+        "OT-ADOM": [{"name": "FW01", "os_ver": "7", "mr": 4, "patch": 2}],
+    })
+    result = assess(adv, client, _FakeHTTPClient(), kev_url="")
+    finding = result.findings[0]
+    assert finding.workaround_status == "not_in_place"
+    assert finding.verdict == "config_change_required"
+
+
+def test_assess_with_workaround_already_in_place_is_no_action():
+    adv = _advisory()
+    adv.workaround_text = "Disable HTTPS admin access on all interfaces"
+    client = FakeFMGClient(devices_by_adom={
+        "OT-ADOM": [{"name": "FW01", "os_ver": "7", "mr": 4, "patch": 2}],
+    })  # default get_device_interface_config only allows "ping"
+    result = assess(adv, client, _FakeHTTPClient(), kev_url="")
+    finding = result.findings[0]
+    assert finding.workaround_status == "in_place"
+    assert finding.verdict == "no_action"
+
+
+def test_assess_degraded_adom_query_marks_devices_unknown():
+    client = FakeFMGClient(adoms=("OT-ADOM",), fail_adoms=("OT-ADOM",))
+    result = assess(_advisory(), client, _FakeHTTPClient(), kev_url="")
+    assert result.degraded is True
+    assert any(w for w in result.warnings)
+    assert result.priority == "unknown"
+
+
+def test_device_firmware_fmg_branch_suffix_stripped():
+    # FortiManager returns os_ver="7.0" where ".0" is a branch suffix, NOT the
+    # minor version. mr=4 is the minor, patch=11 is the patch → 7.4.11.
+    assert _device_firmware({"os_ver": "7.0", "mr": 4, "patch": 11}) == "7.4.11"
+
+
+def test_device_firmware_negative_patch_returns_empty():
+    # patch=-1 means no specific patch tracked — treat as unknown.
+    assert _device_firmware({"os_ver": "7.0", "mr": 4, "patch": -1}) == ""
+
+
+def test_device_firmware_os_ver_major_only():
+    # os_ver as plain integer string (no branch suffix) also works.
+    assert _device_firmware({"os_ver": "7", "mr": 4, "patch": 2}) == "7.4.2"
+
+
+def test_assess_fmg_branch_suffix_version_correctly_evaluated():
+    # Devices with os_ver="7.0" (branch suffix format) must produce the correct
+    # 3-part version for range matching, not route to unknown_needs_manual_check.
+    # Advisory affects 7.4.0-7.4.4; device is 7.4.11 → no_action.
+    client = FakeFMGClient(devices_by_adom={
+        "OT-ADOM": [{"name": "FW01", "os_ver": "7.0", "mr": 4, "patch": 11}],
+    })
+    result = assess(_advisory(), client, _FakeHTTPClient(), kev_url="")
+    assert result.findings[0].current_version == "7.4.11"
+    assert result.findings[0].verdict == "no_action"
+
+
+def test_assess_matches_fortimanager_itself_against_advisory():
+    adv = Advisory(
+        advisory_id="FG-IR-24-002",
+        cve_ids=["CVE-2024-99999"],
+        cvss_score=8.0,
+        affected_ranges=[
+            AffectedRange(product="FortiManager", min_version="7.4.0",
+                          max_version="7.4.5", fixed_version="7.4.6"),
+        ],
+    )
+    client = FakeFMGClient(devices_by_adom={"OT-ADOM": []})
+    result = assess(adv, client, _FakeHTTPClient(), kev_url="")
+    fmg_findings = [f for f in result.findings if f.product == "FortiManager"]
+    assert len(fmg_findings) == 1
+    assert fmg_findings[0].current_version == "7.4.5"
+    assert fmg_findings[0].in_range is True
+
+
+# --- _fmg_version normalization ---
+
+def test_fmg_version_plain():
+    assert _fmg_version("7.4.5") == "7.4.5"
+
+def test_fmg_version_with_leading_v_and_build():
+    # Typical real FortiManager string
+    assert _fmg_version("v7.4.5,build2360,240702 (GA)") == "7.4.5"
+
+def test_fmg_version_with_dash_build():
+    assert _fmg_version("7.4.5-build2360") == "7.4.5"
+
+def test_fmg_version_empty_returns_empty():
+    assert _fmg_version("") == ""
+
+def test_fmg_version_unrecognized_returns_empty():
+    assert _fmg_version("unknown") == ""
+
+
+# --- multi-FMG assessment ---
+
+class _BackupFMGClient:
+    """Fake secondary FortiManager running an older, affected version."""
+    def get_adoms(self):
+        return []
+
+    def get_devices(self, adom):
+        return []
+
+    def get_system_status(self):
+        return {"Version": "7.4.3", "Host Name": "FMG-SITE-B"}
+
+    def get_device_interface_config(self, device, vlanids=None, name=None):
+        return []
+
+
+def test_assess_checks_primary_and_backup_fmg():
+    adv = Advisory(
+        advisory_id="FG-IR-24-003",
+        cve_ids=["CVE-2024-11111"],
+        cvss_score=7.5,
+        affected_ranges=[
+            AffectedRange(product="FortiManager", min_version="7.4.0",
+                          max_version="7.4.4", fixed_version="7.4.5"),
+        ],
+    )
+    primary = FakeFMGClient(devices_by_adom={"OT-ADOM": []})  # version 7.4.5 — not affected
+    backup = _BackupFMGClient()                                # version 7.4.3 — affected
+    result = assess(adv, primary, _FakeHTTPClient(), kev_url="",
+                    extra_fmg_clients=[("FortiManager (backup 1: FMG-SITE-B)", backup)])
+    fmg_findings = [f for f in result.findings if f.product == "FortiManager"]
+    assert len(fmg_findings) == 2
+    primary_f = next(f for f in fmg_findings if "primary" in f.device)
+    backup_f = next(f for f in fmg_findings if "backup" in f.device)
+    assert primary_f.verdict == "no_action"
+    assert backup_f.verdict == "upgrade_required"
+
+
+def test_assess_unreachable_backup_marks_degraded():
+    class _DeadClient:
+        def get_system_status(self):
+            raise RuntimeError("connection refused")
+
+    adv = Advisory(
+        advisory_id="FG-IR-24-004",
+        cve_ids=["CVE-2024-22222"],
+        affected_ranges=[
+            AffectedRange(product="FortiManager", min_version="7.4.0",
+                          max_version="7.4.4", fixed_version="7.4.5"),
+        ],
+    )
+    primary = FakeFMGClient(devices_by_adom={"OT-ADOM": []})
+    result = assess(adv, primary, _FakeHTTPClient(), kev_url="",
+                    extra_fmg_clients=[("FortiManager (backup 1: FMG-SITE-B)", _DeadClient())])
+    assert result.degraded is True
+    assert any("backup" in w for w in result.warnings)
