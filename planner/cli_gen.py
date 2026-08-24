@@ -52,6 +52,19 @@ def service_object_cli(name: str, proto: str, port_expr: str) -> str:
     )
 
 
+def ip_protocol_object_cli(name: str, protocol_number: int) -> str:
+    """CLI block for a custom service object matching a raw IP protocol number (e.g. GRE=47, ESP=50)."""
+    return (
+        'config firewall service custom\n'
+        f'    edit "{name}"\n'
+        '        set protocol IP\n'
+        f'        set protocol-number {protocol_number}\n'
+        '        set comment "<TICKET_ID>"\n'
+        '    next\n'
+        'end'
+    )
+
+
 def policy_cli(
     *,
     name: str,
@@ -110,6 +123,19 @@ def addrgrp_append_cli(group: str, member: str | list[str]) -> str:
     return (
         'config firewall addrgrp\n'
         f'    edit "{group}"\n'
+        f'{appends}\n'
+        '    next\n'
+        'end'
+    )
+
+
+def policy_svc_append_cli(policy_id: int, service_names: list[str]) -> str:
+    """CLI to append service object(s) to an existing policy's service list.
+    `append` preserves existing services (unlike `set service`)."""
+    appends = "\n".join(f'        append service "{s}"' for s in service_names)
+    return (
+        'config firewall policy\n'
+        f'    edit {policy_id}\n'
         f'{appends}\n'
         '    next\n'
         'end'

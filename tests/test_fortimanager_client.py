@@ -1,4 +1,11 @@
+import pytest
+
 from fortimanager_mcp.client import FortiManagerClient
+
+
+@pytest.fixture
+def mock_fmg_client():
+    return FortiManagerClient(primary_host="h", primary_key="k")
 
 
 def test_get_adoms_monkeypatch():
@@ -248,3 +255,60 @@ def test_search_devices_bad_connection_status_reports_error():
     fake = FakeStatusFMG(devices=[])
     out = query.search_devices(fake, "adom1", connection_status="sideways")
     assert "error" in out
+
+
+# ---------------------------------------------------------------------------
+# FortiManagerClient.get_central_snat_rules / get_central_dnat_rules
+# ---------------------------------------------------------------------------
+
+def test_get_central_snat_rules_returns_list(mock_fmg_client):
+    """get_central_snat_rules returns a list of rule dicts."""
+    mock_fmg_client._rpc = lambda method, path, params: [
+        {"id": 1, "orig-addr": ["GE-Peer-165.156.25.6"], "translated-addr": ["ippool-192.234.135.43"]},
+    ]
+    result = mock_fmg_client.get_central_snat_rules("TEST-ADOM", "PRODUCTION/DMZ/DMZXFW_Policy")
+    assert isinstance(result, list)
+    assert result[0]["id"] == 1
+
+
+def test_get_central_dnat_rules_returns_list(mock_fmg_client):
+    """get_central_dnat_rules returns a list of VIP/DNAT rule dicts."""
+    mock_fmg_client._rpc = lambda method, path, params: [
+        {"id": 42, "name": "vip-Cherokee-GE-OMS-NAT", "extip": "192.234.135.43", "mappedip": "170.152.57.68"},
+    ]
+    result = mock_fmg_client.get_central_dnat_rules("TEST-ADOM", "PRODUCTION/DMZ/DMZXFW_Policy")
+    assert isinstance(result, list)
+    assert result[0]["extip"] == "192.234.135.43"
+
+
+def test_get_central_snat_rules_empty_on_missing_table(mock_fmg_client):
+    """Returns empty list when the endpoint returns no data (no central NAT configured)."""
+    mock_fmg_client._rpc = lambda method, path, params: None
+    result = mock_fmg_client.get_central_snat_rules("TEST-ADOM", "PRODUCTION/DMZ/DMZXFW_Policy")
+    assert result == []
+
+
+def test_get_central_snat_uses_correct_path(mock_fmg_client):
+    """Verify the API path includes adom and package name."""
+    calls = []
+
+    def capture_rpc(method, path, params):
+        calls.append(path)
+        return []
+
+    mock_fmg_client._rpc = capture_rpc
+    mock_fmg_client.get_central_snat_rules("MY-ADOM", "PROD/DMZ/Policy")
+    assert any("MY-ADOM" in p and "PROD/DMZ/Policy" in p and "central-snat-map" in p for p in calls)
+
+
+def test_get_central_dnat_uses_correct_path(mock_fmg_client):
+    """Verify the DNAT API path includes adom and package name."""
+    calls = []
+
+    def capture_rpc(method, path, params):
+        calls.append(path)
+        return []
+
+    mock_fmg_client._rpc = capture_rpc
+    mock_fmg_client.get_central_dnat_rules("MY-ADOM", "PROD/DMZ/Policy")
+    assert any("MY-ADOM" in p and "vip" in p and "obj" in p for p in calls)

@@ -1154,3 +1154,271 @@ def test_plan_change_rejects_fqdn_dst():
         )
     assert exc.value.source == "request"
     assert "plan_fqdn_change" in exc.value.detail
+
+
+# ---------------------------------------------------------------------------
+# _service_object_plan — unit tests for specific IP protocol handling
+# ---------------------------------------------------------------------------
+
+from fortimanager_mcp.matching import AddressCatalog, ServiceCatalog
+from planner.engine import _service_object_plan
+from planner.fetch import DeviceSnapshot
+
+
+@pytest.fixture
+def fake_snapshot():
+    """Minimal DeviceSnapshot for _service_object_plan unit tests."""
+    return DeviceSnapshot(
+        device="FW1",
+        adom="root",
+        packages=[],
+        policies_by_package={},
+        addr_catalog=AddressCatalog([], [], [], []),
+        svc_catalog=ServiceCatalog([], []),
+        interfaces=[],
+    )
+
+
+def test_service_plan_ip47_reuses_named_gre_object(fake_snapshot):
+    """When a GRE named object exists in the service catalog, reuse it."""
+    from fortimanager_mcp.matching import ServiceCatalog
+    gre_obj = {"name": "GRE-CS", "protocol": "IP", "protocol-number": 47}
+    fake_snapshot.svc_catalog = ServiceCatalog([gre_obj], [])
+    plan = _service_object_plan("ip/47", fake_snapshot)
+    assert plan.action == "reuse"
+    assert plan.name == "GRE-CS"
+    assert plan.cli == ""
+
+
+def test_service_plan_ip47_creates_object_when_missing(fake_snapshot):
+    """When no named GRE object exists, create an IP-PROTO-47 object."""
+    from fortimanager_mcp.matching import ServiceCatalog
+    fake_snapshot.svc_catalog = ServiceCatalog([], [])
+    plan = _service_object_plan("ip/47", fake_snapshot)
+    assert plan.action == "create"
+    assert plan.name == "IP-PROTO-47"
+    assert "protocol-number 47" in plan.cli
+
+
+def test_service_plan_wildcard_still_maps_to_all(fake_snapshot):
+    """'any', 'all', bare 'ip' still maps to the ALL built-in."""
+    plan = _service_object_plan("any", fake_snapshot)
+    assert plan.name == "ALL"
+    assert plan.action == "reuse"
+
+
+# ---------------------------------------------------------------------------
+# Service-append alternative (Option C)
+# ---------------------------------------------------------------------------
+
+def _fake_fmg_with_partial_svc_rule():
+    """Fake FMG with rule 110223 that covers src/dst but has only HTTPS (not ip/47)."""
+    policies = [
+        {"policyid": 110223, "name": "GE OMS - VPN passthrough bi",
+         "status": "enable", "action": 1, "schedule": ["always"],
+         "srcaddr": ["H_GE_SRC"], "dstaddr": ["H_GE_DST"],
+         "service": ["HTTPS"],
+         "srcintf": ["any"], "dstintf": ["any"], "logtraffic": 2},
+    ]
+    fmg = EngineFMG(policies=policies)
+    base = fmg.get_address_objects("root")
+    _devices = fmg.get_devices
+    _pkgs = fmg.get_policy_packages
+    fmg.get_devices = lambda adom: [{"name": "FW01"}]
+    fmg.get_policy_packages = lambda adom: [
+        {"name": "pkgA", "scope member": [{"name": "FW01"}]}
+    ]
+    fmg.get_address_objects = lambda adom: base + [
+        {"name": "H_GE_SRC", "type": "ipmask", "subnet": "165.156.25.6/32"},
+        {"name": "H_GE_DST", "type": "ipmask", "subnet": "170.152.57.68/32"},
+    ]
+    return fmg
+
+
+def _fake_fmg_with_both_gaps():
+    """Fake FMG with rule that covers dst 170.152.57.68 but NOT src 1.2.3.4 and not ip/47."""
+    policies = [
+        {"policyid": 110224, "name": "GE OMS - partial",
+         "status": "enable", "action": 1, "schedule": ["always"],
+         "srcaddr": ["H_GE_DST"], "dstaddr": ["H_GE_DST"],
+         "service": ["HTTPS"],
+         "srcintf": ["any"], "dstintf": ["any"], "logtraffic": 2},
+    ]
+    fmg = EngineFMG(policies=policies)
+    base = fmg.get_address_objects("root")
+    fmg.get_devices = lambda adom: [{"name": "FW01"}]
+    fmg.get_policy_packages = lambda adom: [
+        {"name": "pkgA", "scope member": [{"name": "FW01"}]}
+    ]
+    fmg.get_address_objects = lambda adom: base + [
+        {"name": "H_GE_DST", "type": "ipmask", "subnet": "170.152.57.68/32"},
+    ]
+    return fmg
+
+
+def _fake_fmg_with_negated_dst_rule():
+    """Fake FMG with rule 99999 that covers src and service but has dstaddr-negate:enable.
+
+    The rule is a 'catch-all except these destinations' style policy.  It should
+    not appear as an Option B candidate even though the source and service match.
+    """
+    policies = [
+        {"policyid": 99999, "name": "Wind Farms catch-all",
+         "status": "enable", "action": 1, "schedule": ["always"],
+         "srcaddr": ["H_GE_SRC"], "dstaddr": ["H_GE_DST"],
+         "dstaddr-negate": "enable",
+         "service": ["HTTPS"],
+         "srcintf": ["any"], "dstintf": ["any"], "logtraffic": 2},
+    ]
+    fmg = EngineFMG(policies=policies)
+    base = fmg.get_address_objects("root")
+    fmg.get_devices = lambda adom: [{"name": "FW01"}]
+    fmg.get_policy_packages = lambda adom: [
+        {"name": "pkgA", "scope member": [{"name": "FW01"}]}
+    ]
+    fmg.get_address_objects = lambda adom: base + [
+        {"name": "H_GE_SRC", "type": "ipmask", "subnet": "10.1.2.3/32"},
+        {"name": "H_GE_DST", "type": "ipmask", "subnet": "10.9.8.7/32"},
+    ]
+    return fmg
+
+
+def test_group_append_alternative_skips_negated_destination_rule():
+    """A rule with dstaddr-negate:enable must not be suggested as Option B."""
+    fmg = _fake_fmg_with_negated_dst_rule()
+    zc = EngineZone(verdict="ALLOWED")
+    plan = plan_change(
+        src="10.1.2.3", dst="10.9.8.7",
+        service="tcp/443",
+        firewalls=[TF(device="FW01", adom="TEST-ADOM")],
+        ticket_id="RITM-NEGATE",
+        fmg_client=fmg, zone_client=zc,
+    )
+    fw = plan.firewalls[0]
+    # The negated-dst rule qualifies by address/service but must be excluded
+    assert fw.alternative is None or fw.alternative.policy_id != 99999
+
+
+def _fake_fmg_with_negated_src_rule():
+    """Fake FMG with a rule where srcaddr-negate:enable and the dst IS in an existing group.
+
+    The rule is a 'catch-all except these sources' style policy.  It should
+    not appear as an Option B candidate for the 'source' side even though the
+    destination and service match.
+    """
+    policies = [
+        {"policyid": 99997, "name": "negated-src-catch-all",
+         "status": "enable", "action": 1, "schedule": ["always"],
+         "srcaddr": ["H_GE_SRC"],
+         "srcaddr-negate": "enable",
+         "dstaddr": ["GRP_NEG_DST"],
+         "service": ["HTTPS"],
+         "srcintf": ["any"], "dstintf": ["any"], "logtraffic": 2},
+    ]
+    fmg = EngineFMG(policies=policies)
+    base = fmg.get_address_objects("root")
+    fmg.get_devices = lambda adom: [{"name": "FW01"}]
+    fmg.get_policy_packages = lambda adom: [
+        {"name": "pkgA", "scope member": [{"name": "FW01"}]}
+    ]
+    fmg.get_address_objects = lambda adom: base + [
+        {"name": "H_GE_SRC", "type": "ipmask", "subnet": "10.1.2.3/32"},
+        {"name": "H_GE_DST2", "type": "ipmask", "subnet": "10.9.8.7/32"},
+    ]
+    fmg.get_address_groups = lambda adom: [
+        {"name": "GRP_NEG_DST", "member": [{"name": "H_GE_DST2"}]},
+    ]
+    return fmg
+
+
+def test_group_append_alternative_skips_negated_source_side():
+    """A rule with srcaddr-negate:enable must not be suggested as Option B."""
+    fmg = _fake_fmg_with_negated_src_rule()
+    zc = EngineZone(verdict="ALLOWED")
+    plan = plan_change(
+        src="10.1.2.3", dst="10.9.8.7",
+        service="tcp/443",
+        firewalls=[TF(device="FW01", adom="TEST-ADOM")],
+        ticket_id="RITM-NEG-SRC",
+        fmg_client=fmg, zone_client=zc,
+    )
+    fw = plan.firewalls[0]
+    # The negated-src rule must not be suggested as Option B
+    assert fw.alternative is None or fw.alternative.policy_id != 99997
+
+
+def _minimal_change_plan(fw):
+    """Build a minimal ChangePlan wrapping a single FirewallPlan for payload tests."""
+    from fortimanager_mcp.matching import PortRange as PR
+    from planner.models import ChangePlan, NormalizedFlow
+    return ChangePlan(
+        ticket_id="TEST-001",
+        flow=NormalizedFlow(src="1.1.1.1", dst="2.2.2.2", service="ip/47",
+                            service_ranges=[PR("ip", 47, 47)]),
+        zone_verdict={"verdict": "ALLOWED"},
+        risk_level="medium",
+        firewalls=[fw],
+        cli_status="new_rule",
+        recommendation="test",
+    )
+
+
+def test_service_append_alternative_found_when_address_covered_service_missing():
+    """When a near-miss rule covers addresses but misses ip/47, Option C is emitted."""
+    fmg = _fake_fmg_with_partial_svc_rule()
+    zc = EngineZone(verdict="ALLOWED")
+    plan = plan_change(
+        src="165.156.25.6", dst="170.152.57.68",
+        service="ip/47",
+        firewalls=[TF(device="FW01", adom="TEST-ADOM")],
+        ticket_id="RITM-TEST",
+        fmg_client=fmg, zone_client=zc,
+    )
+    fw = plan.firewalls[0]
+    assert fw.service_alternative is not None
+    assert fw.service_alternative.policy_id == 110223
+    assert fw.service_alternative.policy_name == "GE OMS - VPN passthrough bi"
+    assert "IP-PROTO-47" in fw.service_alternative.services_to_add
+    assert "110223" in fw.service_alternative.service_cli
+
+
+def test_service_append_alternative_absent_when_address_gap_exists():
+    """When address AND service are both gapped, Option C is not emitted."""
+    fmg = _fake_fmg_with_both_gaps()
+    zc = EngineZone(verdict="ALLOWED")
+    plan = plan_change(
+        src="1.2.3.4", dst="170.152.57.68",
+        service="ip/47",
+        firewalls=[TF(device="FW01", adom="TEST-ADOM")],
+        ticket_id="RITM-TEST2",
+        fmg_client=fmg, zone_client=zc,
+    )
+    fw = plan.firewalls[0]
+    assert fw.service_alternative is None
+
+
+def test_service_alternative_in_report_payload():
+    """to_report_payload includes service_alternative when present."""
+    from planner.models import FirewallPlan, ServiceAppendAlternative
+    svc_alt = ServiceAppendAlternative(
+        package="TEST/pkg",
+        policy_id=110223,
+        policy_name="GE OMS - VPN passthrough bi",
+        services_to_add=["IP-PROTO-47"],
+        service_cli=(
+            "config firewall policy\n"
+            "    edit 110223\n"
+            '        append service "IP-PROTO-47"\n'
+            "    next\n"
+            "end"
+        ),
+    )
+    fw = FirewallPlan(firewall="FW01", adom="TEST", status="new_rule",
+                      service_alternative=svc_alt)
+    plan = _minimal_change_plan(fw)
+    payload = to_report_payload(plan)
+    fw_entry = payload["cli"]["per_firewall"][0]
+    assert fw_entry.get("service_alternative") is not None
+    assert fw_entry["service_alternative"]["policy_id"] == 110223
+    assert fw_entry["service_alternative"]["services_to_add"] == ["IP-PROTO-47"]
+    assert "110223" in fw_entry["service_alternative"]["summary"]

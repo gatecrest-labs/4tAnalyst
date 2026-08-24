@@ -631,3 +631,36 @@ def test_validate_fqdn_payload_rejects_ip_change_payload():
     # _minimal_payload() has no plan_type key; validate_fqdn_payload should reject it
     with pytest.raises(render_report.PayloadError):
         validate_fqdn_payload(ip_payload)
+
+
+def test_render_report_includes_option_c_when_service_alternative_present():
+    payload = _minimal_payload()
+    payload["cli"]["per_firewall"] = [{
+        "firewall": "FW1",
+        "address_objects": [],
+        "policy": {"cli": "", "name": ""},
+        "warnings": [],
+        "service_alternative": {
+            "summary": "Extend rule #110223 'GE OMS - VPN passthrough bi' by appending IP-PROTO-47.",
+            "package": "PRODUCTION/DMZ/DMZXFW_Policy",
+            "policy_id": 110223,
+            "policy_name": "GE OMS - VPN passthrough bi",
+            "services_to_add": ["IP-PROTO-47"],
+            "service_cli": (
+                "config firewall policy\n    edit 110223\n"
+                "        append service \"IP-PROTO-47\"\n    next\nend"
+            ),
+            "warnings": ["Verify IP-PROTO-47 exists as a named service object."],
+        },
+    }]
+    html = render_report.render_html(payload)
+    assert "Option C" in html
+    assert "Amend Service" in html
+    assert "110223" in html
+    assert "IP-PROTO-47" in html
+
+
+def test_render_report_no_option_c_section_when_absent():
+    payload = _minimal_payload()
+    html = render_report.render_html(payload)
+    assert "Option C" not in html

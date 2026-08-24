@@ -171,3 +171,22 @@ def test_wildcard_fqdn_address_object_cli():
 def test_fqdn_object_cli_no_comment():
     result = fqdn_address_object_cli("FQDN-example.com", "example.com", "")
     assert "set comment" not in result
+
+
+def test_ip_protocol_object_cli():
+    from planner.cli_gen import ip_protocol_object_cli
+    cli = ip_protocol_object_cli("GRE-CS", 47)
+    assert 'edit "GRE-CS"' in cli
+    assert "set protocol IP" in cli
+    assert "set protocol-number 47" in cli
+    assert cli.startswith("config firewall service custom")
+
+
+def test_policy_svc_append_cli():
+    from planner.cli_gen import policy_svc_append_cli
+    cli = policy_svc_append_cli(110223, ["IP-PROTO-47", "IKE-CS"])
+    assert "edit 110223" in cli
+    assert 'append service "IP-PROTO-47"' in cli
+    assert 'append service "IKE-CS"' in cli
+    assert cli.startswith("config firewall policy")
+    assert cli.strip().endswith("end")

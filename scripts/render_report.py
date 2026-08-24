@@ -176,6 +176,17 @@ def render_conf(data: dict) -> str:
             elif alt.get("direct_cli"):
                 parts.append(alt["direct_cli"].replace("<TICKET_ID>", ticket))
                 parts.append("")
+        svc_alt = fw.get("service_alternative")
+        if svc_alt:
+            parts.append(f"# {'-' * 77}")
+            parts.append("# OPTION C -- amend service list on existing rule")
+            for w in svc_alt.get("warnings", []):
+                parts.append(f"# WARNING: {w}")
+            parts.append(f"# {'-' * 77}")
+            parts.append("")
+            if svc_alt.get("service_cli"):
+                parts.append(svc_alt["service_cli"].replace("<TICKET_ID>", ticket))
+                parts.append("")
     return "\n".join(parts)
 
 
@@ -474,6 +485,30 @@ def render_html(
         if alt_html else ""
     )
 
+    svc_alt_html = ""
+    for fw_cli in data["cli"].get("per_firewall", []):
+        svc_alt = fw_cli.get("service_alternative")
+        if not svc_alt:
+            continue
+        svc_warn_html = "".join(f"<li>{esc(w)}</li>" for w in svc_alt.get("warnings", []))
+        svc_names = ", ".join(f"<code>{esc(s)}</code>" for s in svc_alt.get("services_to_add", []))
+        svc_cli_html = f"<pre><code>{esc(svc_alt.get('service_cli', ''))}</code></pre>"
+        svc_alt_html += (
+            f"<div class='rule-card'><strong>{esc(fw_cli.get('firewall', ''))}</strong> "
+            f"<span class='tag'>OPTION C</span>"
+            f"<div class='note'>{esc(svc_alt.get('summary', ''))}</div>"
+            f"<p class='note'>Add to service list: {svc_names}</p>"
+            f"{svc_cli_html}"
+            f"<ul>{svc_warn_html}</ul></div>"
+        )
+    svc_alt_block = (
+        "<section><h2>Option C: Amend Service List</h2>"
+        "<div class='note'>Cleanest path when the address pair is already right — "
+        "append the missing service to the existing rule. Choose ONE option only.</div>"
+        f"{svc_alt_html}</section>"
+        if svc_alt_html else ""
+    )
+
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -608,6 +643,8 @@ def render_html(
   </section>
 
   {alt_block}
+
+  {svc_alt_block}
 
   {warnings_block}
 
