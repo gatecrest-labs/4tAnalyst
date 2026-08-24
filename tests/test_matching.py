@@ -13,9 +13,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from fortimanager_mcp.matching import (
+    WILDCARD_RANGE,
     PortRange,
     ServiceCatalog,
-    WILDCARD_RANGE,
     parse_service_request,
 )
 

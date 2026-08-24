@@ -1,4 +1,5 @@
 import pytest
+
 from fortimanager_mcp.client import FortiManagerClient
 
 
