@@ -15,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from fortimanager_mcp.matching import (
     PortRange,
     ServiceCatalog,
+    WILDCARD_RANGE,
     parse_service_request,
 )
 
@@ -142,9 +143,9 @@ def test_catalog_ip_protocol_with_icmp_number_resolves_to_icmp():
 
 
 def test_catalog_ip_protocol_with_unknown_number_is_unresolvable():
-    # protocol=IP + protocol-number=47 (GRE) is not in our map; return None.
-    cat = _catalog([{"name": "GRE", "protocol": "IP", "protocol-number": 47}])
-    assert cat.ranges_for_ref("GRE") is None
+    # protocol=IP + an unknown protocol-number (e.g. 254) is not in our map; return None.
+    cat = _catalog([{"name": "UNKNOWN_PROTO", "protocol": "IP", "protocol-number": 254}])
+    assert cat.ranges_for_ref("UNKNOWN_PROTO") is None
 
 
 def test_icmp_proto_service_does_not_match_tcp22():
@@ -517,3 +518,58 @@ def test_uncovered_services_empty_for_broad_range():
     pol = {"service": ["BIG"]}
     requested = parse_service_request("tcp/33001") + parse_service_request("udp/33001")
     assert m.uncovered_services(pol, requested) == []
+
+
+# ---------------------------------------------------------------------------
+# ip/N specific protocol parsing (Task 1 — fix ip/N as concrete protocol)
+# ---------------------------------------------------------------------------
+
+def test_ip_47_parses_as_specific_protocol():
+    ranges = parse_service_request("ip/47")
+    assert ranges == [PortRange("ip", 47, 47)]
+
+
+def test_ip_50_parses_as_specific_protocol():
+    ranges = parse_service_request("ip/50")
+    assert ranges == [PortRange("ip", 50, 50)]
+
+
+def test_ip_no_number_parses_as_wildcard():
+    assert parse_service_request("ip") == [WILDCARD_RANGE]
+
+
+def test_wildcard_contains_specific_ip_proto():
+    assert WILDCARD_RANGE.contains(PortRange("ip", 47, 47))
+
+
+def test_specific_ip_proto_does_not_contain_wildcard():
+    assert not PortRange("ip", 47, 47).contains(WILDCARD_RANGE)
+
+
+def test_specific_ip_proto_self_contains():
+    assert PortRange("ip", 47, 47).contains(PortRange("ip", 47, 47))
+
+
+def test_specific_ip_proto_does_not_contain_different_proto():
+    assert not PortRange("ip", 47, 47).contains(PortRange("ip", 50, 50))
+
+
+def test_wildcard_overlaps_specific_ip_proto():
+    assert WILDCARD_RANGE.overlaps(PortRange("ip", 47, 47))
+    assert PortRange("ip", 47, 47).overlaps(WILDCARD_RANGE)
+
+
+def test_specific_ip_proto_does_not_overlap_different_proto():
+    assert not PortRange("ip", 47, 47).overlaps(PortRange("ip", 50, 50))
+
+
+def test_service_catalog_resolves_protocol_number_47():
+    obj = {"name": "GRE", "protocol": "IP", "protocol-number": 47}
+    catalog = ServiceCatalog([obj], [])
+    assert catalog.ranges_for_ref("GRE") == [PortRange("ip", 47, 47)]
+
+
+def test_service_catalog_resolves_protocol_number_50():
+    obj = {"name": "ESP", "protocol": "IP", "protocol-number": 50}
+    catalog = ServiceCatalog([obj], [])
+    assert catalog.ranges_for_ref("ESP") == [PortRange("ip", 50, 50)]
