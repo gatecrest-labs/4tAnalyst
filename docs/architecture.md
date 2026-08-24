@@ -32,6 +32,7 @@ fwanalyst_server (single process) ──────────────┤
   │                      │                    ├──▶ 4THealth external API
   │                      │                    ├──▶ FortiManager JSON-RPC
   │                      │                    └──▶ standards YAML + render_report
+  │                      ├── psirt tools      ──▶ FortiManager API + fortiguard.com + CISA KEV
   │                      ├── standards tools  ──▶ local files
   │                      ├── fortimanager tools ──▶ FortiManager API
   │                      └── feedback tools   ──▶ SQLite
@@ -109,6 +110,16 @@ Tools: `query_zone_policy`, `get_zones`, `get_policies`, `find_zone_for_ip`, `ch
 
 This is the IP → Firewall Mapper for Phase 2. Given a source and destination IP, it resolves both to zones and returns the governing policy verdict. The 4THealth application is the source of truth for zone definitions and subnets.
 
+### psirt_mcp
+
+Deterministic Fortinet PSIRT advisory assessment — no auto-remediation.
+
+Tools: `parse_advisory`, `assess_fleet_exposure`, `render_psirt_report`
+
+Given a Fortinet PSIRT advisory email, produces a per-device verdict (no-action / config-change-required / upgrade-required) across the fleet with exploit-aware priority scoring and an HTML report. The calling model (Claude Code, via `/analyze-psirt`) extracts structured fields from the advisory and passes them to `parse_advisory` for validation; `assess_fleet_exposure` runs the deterministic `psirt.engine.assess()` against all ADOMs/devices in FortiManager; `render_psirt_report` writes the HTML report.
+
+Priority is exploit-aware: a KEV catalog hit or non-empty exploitation text forces priority to at least high regardless of CVSS score. A fully degraded scan (all ADOM queries failed) returns `priority="unknown"` rather than claiming "informational" — degraded data never asserts safety.
+
 ### netbrain_mcp — planned
 
 Network topology queries via the NetBrain API. This MCP server is not yet built — the NetBrain API integration details are TBD. When available, it will provide automated path discovery: given a source and destination IP, return the firewalls that sit in the traffic path.
@@ -159,9 +170,10 @@ Engineer: /analyze-request
 |---|---|---|
 | 1 | Standards MCP — zone matrix, naming, review requirements | Complete |
 | 2 | FortiManager MCP, IP-to-zone mapper (zone_mcp) | Complete |
-| 3 | Recommendation engine with reasoning chain and risk scoring; NetBrain topology integration (pending API details) | Planned |
-| 4 | Peer review package generation, feedback loop, change record scaffolding | Planned |
-| 5 | mTLS hardening, Ansible change preview, Postgres migration, HA | Planned |
+| 2.5 | PSIRT advisory assessment (psirt / psirt_mcp / `/analyze-psirt`) | Complete |
+| 3 | Deploy to team + feedback collection (4–8 weeks real data); recommendation engine + risk scorer; NetBrain topology integration (pending API details) | In progress |
+| 4 | Recommendation engine built on feedback data; Postgres migration; engineer identity (AD/Entra token) | Planned |
+| 5 | mTLS hardening, Ansible change preview, HA | Planned |
 
 ---
 

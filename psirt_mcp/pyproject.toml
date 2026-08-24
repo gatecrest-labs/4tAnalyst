@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "psirt-mcp"
+version = "0.1.0"
+description = "PSIRT advisory assessment MCP server — parses Fortinet PSIRT emails and assesses fleet exposure"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp[cli]>=1.0.0,<2.0.0",
+    "pyyaml>=6.0",
+    "httpx>=0.28.1",
+]
+
+[project.scripts]
+psirt-mcp = "psirt_mcp.server:mcp.run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["psirt_mcp"]

@@ -73,17 +73,17 @@ sudo -u 4tanalyst bash -c "
 sudo -u 4tanalyst bash -c "HOME=/opt/4tanalyst UV_NO_CONFIG=1 /usr/local/bin/uv venv --python 3.11 /opt/4tanalyst/.venv && \
     cd /opt/4tanalyst && HOME=/opt/4tanalyst UV_NO_CONFIG=1 /usr/local/bin/uv pip install \
     -e mcp_common/ -e standards_mcp/ -e fortimanager_mcp/ -e feedback_mcp/ \
-    -e intake_mcp/ -e zone_mcp/ -e fwanalyst_server/"
+    -e intake_mcp/ -e zone_mcp/ -e psirt/ -e psirt_mcp/ -e fwanalyst_server/"
 ```
 
-Verify all 7 editable packages installed into the venv:
+Verify all 9 editable packages installed into the venv:
 
 ```bash
 sudo -u 4tanalyst bash -c "HOME=/opt/4tanalyst UV_NO_CONFIG=1 /usr/local/bin/uv pip list --python /opt/4tanalyst/.venv/bin/python" | \
-    grep -E "standards|fortimanager|feedback|intake|zone|fortigate-change-planner|fwanalyst|mcp"
+    grep -E "standards|fortimanager|feedback|intake|zone|psirt|fortigate-change-planner|fwanalyst|mcp"
 ```
 
-You should see all 7 editable packages listed with their paths under `/opt/4tanalyst`, plus `fortigate-change-planner` (pulled in transitively as a git dependency of `fwanalyst_server`, not editable, no local path under `/opt/4tanalyst`).
+You should see all 9 editable packages listed with their paths under `/opt/4tanalyst` (`mcp_common`, `standards_mcp`, `fortimanager_mcp`, `feedback_mcp`, `intake_mcp`, `zone_mcp`, `psirt`, `psirt_mcp`, `fwanalyst_server`), plus `fortigate-change-planner` (pulled in transitively as a git dependency of `fwanalyst_server`, not editable, no local path under `/opt/4tanalyst`).
 
 ### 6. Create the first admin user
 

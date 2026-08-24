@@ -18,6 +18,8 @@ COPY feedback_mcp/ feedback_mcp/
 COPY intake_mcp/ intake_mcp/
 COPY zone_mcp/ zone_mcp/
 COPY planner/ planner/
+COPY psirt/ psirt/
+COPY psirt_mcp/ psirt_mcp/
 COPY fwanalyst_server/ fwanalyst_server/
 COPY scripts/ scripts/
 # Note: standards_mcp/policy_db.json and standards_mcp/policy-data/ (real
@@ -31,7 +33,7 @@ COPY scripts/ scripts/
 RUN python -m pip install --upgrade pip setuptools wheel
 RUN python -m pip install uv
 RUN python -m pip install -e mcp_common/ -e standards_mcp/ -e fortimanager_mcp/ -e feedback_mcp/ -e intake_mcp/ -e zone_mcp/ \
-    -e planner/ -e fwanalyst_server/
+    -e planner/ -e psirt/ -e psirt_mcp/ -e fwanalyst_server/
 
 EXPOSE 8000
 
