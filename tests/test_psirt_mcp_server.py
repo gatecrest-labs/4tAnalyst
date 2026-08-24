@@ -70,13 +70,14 @@ def test_assess_fleet_exposure_returns_assessment_dict(monkeypatch):
     }
     result = server.assess_fleet_exposure(advisory)
     assert result["priority"] in ("critical", "high", "medium", "low", "informational", "unknown")
-    # compact summary — full findings are in assessment_json, not inline
     assert "total_findings" in result
     assert "verdict_counts" in result
-    assert "assessment_json" in result
+    # HTML is returned as a string for the caller to write locally — no server paths
+    assert "html_content" in result
+    assert "assessment_json" not in result
 
 
-def test_render_psirt_report_writes_html(tmp_path):
+def test_render_psirt_report_returns_html_content():
     assessment = {
         "plan_type": "psirt_advisory",
         "advisory": {
@@ -93,6 +94,8 @@ def test_render_psirt_report_writes_html(tmp_path):
         "degraded": False,
         "warnings": [],
     }
-    result = server.render_psirt_report(assessment=assessment, output_dir=str(tmp_path))
-    assert Path(result["html_path"]).exists()
-    assert "FG-IR-24-001" in Path(result["html_path"]).read_text()
+    result = server.render_psirt_report(assessment=assessment)
+    assert "html_content" in result
+    assert "FG-IR-24-001" in result["html_content"]
+    # Server never writes files — no html_path key
+    assert "html_path" not in result

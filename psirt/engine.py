@@ -14,6 +14,7 @@ being silently skipped — same discipline as planner/fetch.py.
 from __future__ import annotations
 
 import dataclasses
+import re
 from typing import Any
 
 from psirt.enrich import enrich_advisory
@@ -23,6 +24,18 @@ from psirt.version_match import VersionMatchError, version_in_range
 from psirt.workaround_checks import check_workaround, match_workaround_pattern
 
 _SUPPORTED_PRODUCTS = {"fortios", "fortigate", "fortimanager"}
+_VERSION_EXTRACT = re.compile(r"\d+\.\d+\.\d+")
+
+
+def _fmg_version(raw: str) -> str:
+    """Extract a clean X.Y.Z version from a FortiManager get_system_status() Version string.
+
+    FortiManager returns strings like "v7.4.5,build2360,240702 (GA)" or "7.4.5-buildNNN".
+    Strip the leading 'v', take the first X.Y.Z component found.
+    Returns "" if no valid three-part version is found.
+    """
+    m = _VERSION_EXTRACT.search(raw)
+    return m.group(0) if m else ""
 
 
 def _device_firmware(device: dict) -> str:
@@ -165,6 +178,7 @@ def assess(
     fmg_client: Any,
     http_client: Any,
     kev_url: str,
+    extra_fmg_clients: "list[tuple[str, Any]] | None" = None,
 ) -> PsirtAssessment:
     """
     Main entry point. Enriches the advisory, scans every ADOM/device the
@@ -201,18 +215,23 @@ def assess(
         if r.product.strip().lower() == "fortimanager"
     ]
 
-    # Evaluate FortiManager itself if the advisory names it as a product.
+    # Evaluate every FortiManager instance if the advisory names it as a product.
+    # Primary is always checked; extra_fmg_clients carries (label, client) for backups.
     if fmg_ranges:
-        status = fmg_client.get_system_status()
-        fmg_version = str(status.get("Version", "")).strip()
-        # FortiManager self-assessment: skip device-config workaround checks
-        # (they use device-name queries that don't apply to the manager itself)
         fmg_advisory_no_workaround = dataclasses.replace(advisory, workaround_text="")
-        findings.append(_evaluate_device(
-            fmg_advisory_no_workaround, fmg_ranges,
-            "FortiManager (this instance)", "-",
-            "FortiManager", fmg_version, fmg_client,
-        ))
+        all_fmg = [("FortiManager (primary)", fmg_client)] + list(extra_fmg_clients or [])
+        for fmg_label, fmg_inst in all_fmg:
+            try:
+                status = fmg_inst.get_system_status()
+            except Exception as exc:
+                degraded = True
+                warnings.append(f"Could not reach {fmg_label}: {exc}")
+                continue
+            fmg_version = _fmg_version(str(status.get("Version", "")))
+            findings.append(_evaluate_device(
+                fmg_advisory_no_workaround, fmg_ranges,
+                fmg_label, "-", "FortiManager", fmg_version, fmg_inst,
+            ))
 
     # Evaluate every FortiGate device in every ADOM.
     if fortios_ranges:

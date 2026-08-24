@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from psirt.engine import _device_firmware, assess
+from psirt.engine import _device_firmware, _fmg_version, assess
 from psirt.models import Advisory, AffectedRange
 
 
@@ -169,3 +169,81 @@ def test_assess_matches_fortimanager_itself_against_advisory():
     assert len(fmg_findings) == 1
     assert fmg_findings[0].current_version == "7.4.5"
     assert fmg_findings[0].in_range is True
+
+
+# --- _fmg_version normalization ---
+
+def test_fmg_version_plain():
+    assert _fmg_version("7.4.5") == "7.4.5"
+
+def test_fmg_version_with_leading_v_and_build():
+    # Typical real FortiManager string
+    assert _fmg_version("v7.4.5,build2360,240702 (GA)") == "7.4.5"
+
+def test_fmg_version_with_dash_build():
+    assert _fmg_version("7.4.5-build2360") == "7.4.5"
+
+def test_fmg_version_empty_returns_empty():
+    assert _fmg_version("") == ""
+
+def test_fmg_version_unrecognized_returns_empty():
+    assert _fmg_version("unknown") == ""
+
+
+# --- multi-FMG assessment ---
+
+class _BackupFMGClient:
+    """Fake secondary FortiManager running an older, affected version."""
+    def get_adoms(self):
+        return []
+
+    def get_devices(self, adom):
+        return []
+
+    def get_system_status(self):
+        return {"Version": "7.4.3", "Host Name": "FMG-SITE-B"}
+
+    def get_device_interface_config(self, device, vlanids=None, name=None):
+        return []
+
+
+def test_assess_checks_primary_and_backup_fmg():
+    adv = Advisory(
+        advisory_id="FG-IR-24-003",
+        cve_ids=["CVE-2024-11111"],
+        cvss_score=7.5,
+        affected_ranges=[
+            AffectedRange(product="FortiManager", min_version="7.4.0",
+                          max_version="7.4.4", fixed_version="7.4.5"),
+        ],
+    )
+    primary = FakeFMGClient(devices_by_adom={"OT-ADOM": []})  # version 7.4.5 — not affected
+    backup = _BackupFMGClient()                                # version 7.4.3 — affected
+    result = assess(adv, primary, _FakeHTTPClient(), kev_url="",
+                    extra_fmg_clients=[("FortiManager (backup 1: FMG-SITE-B)", backup)])
+    fmg_findings = [f for f in result.findings if f.product == "FortiManager"]
+    assert len(fmg_findings) == 2
+    primary_f = next(f for f in fmg_findings if "primary" in f.device)
+    backup_f = next(f for f in fmg_findings if "backup" in f.device)
+    assert primary_f.verdict == "no_action"
+    assert backup_f.verdict == "upgrade_required"
+
+
+def test_assess_unreachable_backup_marks_degraded():
+    class _DeadClient:
+        def get_system_status(self):
+            raise RuntimeError("connection refused")
+
+    adv = Advisory(
+        advisory_id="FG-IR-24-004",
+        cve_ids=["CVE-2024-22222"],
+        affected_ranges=[
+            AffectedRange(product="FortiManager", min_version="7.4.0",
+                          max_version="7.4.4", fixed_version="7.4.5"),
+        ],
+    )
+    primary = FakeFMGClient(devices_by_adom={"OT-ADOM": []})
+    result = assess(adv, primary, _FakeHTTPClient(), kev_url="",
+                    extra_fmg_clients=[("FortiManager (backup 1: FMG-SITE-B)", _DeadClient())])
+    assert result.degraded is True
+    assert any("backup" in w for w in result.warnings)
