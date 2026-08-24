@@ -31,7 +31,27 @@ def _device_firmware(device: dict) -> str:
     patch = str(device.get("patch", "")).strip()
     if not os_ver or not mr or not patch:
         return ""  # incomplete version → treat as unknown
-    return f"{os_ver}.{mr}.{patch}"
+    # FortiManager may return os_ver as "MAJOR.MINOR" (e.g. "7.0") rather than
+    # just "MAJOR", making the assembled string 4 parts: "7.0.4.11". Advisory
+    # ranges are always 3-part (MAJOR.MINOR.PATCH), so normalise to the first
+    # three non-negative integer components and drop the build number.
+    # A negative component (-1 = no build applied) stops the walk; anything
+    # before it is still usable.
+    raw = f"{os_ver}.{mr}.{patch}"
+    parts: list[int] = []
+    for seg in raw.split("."):
+        try:
+            val = int(seg)
+        except ValueError:
+            break
+        if val < 0:
+            break  # -1 build marker — stop, keep what we have
+        parts.append(val)
+        if len(parts) == 3:
+            break
+    if len(parts) < 3:
+        return ""  # not enough components → treat as unknown
+    return ".".join(str(p) for p in parts)
 
 
 def _evaluate_device(
