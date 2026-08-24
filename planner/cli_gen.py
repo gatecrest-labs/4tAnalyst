@@ -129,6 +129,19 @@ def addrgrp_append_cli(group: str, member: str | list[str]) -> str:
     )
 
 
+def policy_svc_append_cli(policy_id: int, service_names: list[str]) -> str:
+    """CLI to append service object(s) to an existing policy's service list.
+    `append` preserves existing services (unlike `set service`)."""
+    appends = "\n".join(f'        append service "{s}"' for s in service_names)
+    return (
+        'config firewall policy\n'
+        f'    edit {policy_id}\n'
+        f'{appends}\n'
+        '    next\n'
+        'end'
+    )
+
+
 def policy_addr_append_cli(policy_id: int, key: str, members: list[str]) -> str:
     """CLI to append address object(s) directly to a policy's srcaddr or
     dstaddr list.  `append` preserves the existing entries (unlike `set`).
