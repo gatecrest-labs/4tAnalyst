@@ -129,11 +129,25 @@ def _address_object_plan(role: str, ip: str, snapshot: DeviceSnapshot) -> Object
 
 
 def _service_object_plan(token: str, snapshot: DeviceSnapshot) -> ObjectPlan:
+    from fortimanager_mcp.matching import WILDCARD_RANGE
     ranges = parse_service_request(token)
-    if any(r.protocol == "ip" for r in ranges):
-        # wildcard service — FortiGate's built-in ALL object, never created
+    # Only the true wildcard (all protocols) maps to FortiGate's built-in ALL
+    if ranges == [WILDCARD_RANGE]:
         return ObjectPlan(role="service", action="reuse", name="ALL",
                           obj_type="service", value=token)
+    # Specific IP protocol number (e.g. ip/47 = GRE, ip/50 = ESP)
+    if len(ranges) == 1 and ranges[0].protocol == "ip":
+        proto_num = ranges[0].start
+        existing = snapshot.svc_catalog.exact_match_name(ranges)
+        if existing:
+            return ObjectPlan(role="service", action="reuse", name=existing,
+                              obj_type="service", value=token)
+        name = f"IP-PROTO-{proto_num}"
+        return ObjectPlan(
+            role="service", action="create", name=name, obj_type="service",
+            value=f"ip/{proto_num}",
+            cli=cli_gen.ip_protocol_object_cli(name, proto_num),
+        )
     existing = snapshot.svc_catalog.exact_match_name(ranges)
     if existing:
         return ObjectPlan(role="service", action="reuse", name=existing,

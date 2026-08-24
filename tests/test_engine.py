@@ -1154,3 +1154,54 @@ def test_plan_change_rejects_fqdn_dst():
         )
     assert exc.value.source == "request"
     assert "plan_fqdn_change" in exc.value.detail
+
+
+# ---------------------------------------------------------------------------
+# _service_object_plan — unit tests for specific IP protocol handling
+# ---------------------------------------------------------------------------
+
+from planner.engine import _service_object_plan
+from planner.fetch import DeviceSnapshot
+from fortimanager_mcp.matching import AddressCatalog, ServiceCatalog
+
+
+@pytest.fixture
+def fake_snapshot():
+    """Minimal DeviceSnapshot for _service_object_plan unit tests."""
+    return DeviceSnapshot(
+        device="FW1",
+        adom="root",
+        packages=[],
+        policies_by_package={},
+        addr_catalog=AddressCatalog([], [], [], []),
+        svc_catalog=ServiceCatalog([], []),
+        interfaces=[],
+    )
+
+
+def test_service_plan_ip47_reuses_named_gre_object(fake_snapshot):
+    """When a GRE named object exists in the service catalog, reuse it."""
+    from fortimanager_mcp.matching import PortRange, ServiceCatalog
+    gre_obj = {"name": "GRE-CS", "protocol": "IP", "protocol-number": 47}
+    fake_snapshot.svc_catalog = ServiceCatalog([gre_obj], [])
+    plan = _service_object_plan("ip/47", fake_snapshot)
+    assert plan.action == "reuse"
+    assert plan.name == "GRE-CS"
+    assert plan.cli == ""
+
+
+def test_service_plan_ip47_creates_object_when_missing(fake_snapshot):
+    """When no named GRE object exists, create an IP-PROTO-47 object."""
+    from fortimanager_mcp.matching import ServiceCatalog
+    fake_snapshot.svc_catalog = ServiceCatalog([], [])
+    plan = _service_object_plan("ip/47", fake_snapshot)
+    assert plan.action == "create"
+    assert plan.name == "IP-PROTO-47"
+    assert "protocol-number 47" in plan.cli
+
+
+def test_service_plan_wildcard_still_maps_to_all(fake_snapshot):
+    """'any', 'all', bare 'ip' still maps to the ALL built-in."""
+    plan = _service_object_plan("any", fake_snapshot)
+    assert plan.name == "ALL"
+    assert plan.action == "reuse"

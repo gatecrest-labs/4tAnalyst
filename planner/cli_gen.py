@@ -52,6 +52,19 @@ def service_object_cli(name: str, proto: str, port_expr: str) -> str:
     )
 
 
+def ip_protocol_object_cli(name: str, protocol_number: int) -> str:
+    """CLI block for a custom service object matching a raw IP protocol number (e.g. GRE=47, ESP=50)."""
+    return (
+        'config firewall service custom\n'
+        f'    edit "{name}"\n'
+        '        set protocol IP\n'
+        f'        set protocol-number {protocol_number}\n'
+        '        set comment "<TICKET_ID>"\n'
+        '    next\n'
+        'end'
+    )
+
+
 def policy_cli(
     *,
     name: str,

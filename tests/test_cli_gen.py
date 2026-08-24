@@ -171,3 +171,12 @@ def test_wildcard_fqdn_address_object_cli():
 def test_fqdn_object_cli_no_comment():
     result = fqdn_address_object_cli("FQDN-example.com", "example.com", "")
     assert "set comment" not in result
+
+
+def test_ip_protocol_object_cli():
+    from planner.cli_gen import ip_protocol_object_cli
+    cli = ip_protocol_object_cli("GRE-CS", 47)
+    assert 'edit "GRE-CS"' in cli
+    assert "set protocol IP" in cli
+    assert "set protocol-number 47" in cli
+    assert cli.startswith("config firewall service custom")
