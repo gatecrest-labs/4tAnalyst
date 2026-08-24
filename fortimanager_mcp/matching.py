@@ -17,16 +17,20 @@ from __future__ import annotations
 import ipaddress
 from dataclasses import dataclass
 
-_WILDCARD_PROTOCOLS = ("ip",)
+def _is_wildcard(pr: "PortRange") -> bool:
+    """True only for WILDCARD_RANGE (ip 0-65535), not specific ip/N protocols."""
+    return pr.protocol == "ip" and pr.start == 0 and pr.end == 65535
 
 
 @dataclass(frozen=True)
 class PortRange:
     """A contiguous destination-port range on one protocol.
 
-    protocol "ip" (with 0-65535) is the wildcard: it contains/overlaps
-    everything. "icmp" has no ports; it is stored as a full range and only
-    matches other icmp/ip entries.
+    protocol "ip" with range 0-65535 (WILDCARD_RANGE) is the wildcard: it
+    contains/overlaps everything. Specific ip/N values (e.g. ip/47 for GRE,
+    ip/50 for ESP) are concrete protocol ranges and only match themselves.
+    "icmp" has no ports; it is stored as a full range and only matches other
+    icmp/ip entries.
     """
 
     protocol: str  # "tcp" | "udp" | "sctp" | "icmp" | "ip"
@@ -34,26 +38,24 @@ class PortRange:
     end: int
 
     def _proto_compatible(self, other: "PortRange") -> bool:
-        return (
-            self.protocol in _WILDCARD_PROTOCOLS
-            or other.protocol in _WILDCARD_PROTOCOLS
-            or self.protocol == other.protocol
-        )
+        if _is_wildcard(self) or _is_wildcard(other):
+            return True
+        return self.protocol == other.protocol
 
     def contains(self, other: "PortRange") -> bool:
+        if _is_wildcard(self):
+            return True
+        if _is_wildcard(other):
+            return False
         if not self._proto_compatible(other):
             return False
-        if self.protocol in _WILDCARD_PROTOCOLS:
-            return True
-        if other.protocol in _WILDCARD_PROTOCOLS:
-            return False
-        return self.start <= other.start and other.end <= self.end
+        return self.start <= other.start and self.end >= other.end
 
     def overlaps(self, other: "PortRange") -> bool:
+        if _is_wildcard(self) or _is_wildcard(other):
+            return True
         if not self._proto_compatible(other):
             return False
-        if self.protocol in _WILDCARD_PROTOCOLS or other.protocol in _WILDCARD_PROTOCOLS:
-            return True
         return self.start <= other.end and other.start <= self.end
 
 
@@ -106,7 +108,7 @@ def parse_service_request(service: str, protocol_hint: str = "") -> list[PortRan
     that to the engineer rather than guessing.
     """
     raw = service.strip().lower()
-    if raw in ("", "any", "all"):
+    if raw in ("", "any", "all", "ip"):
         return [WILDCARD_RANGE]
 
     if "/" in raw:
@@ -114,8 +116,20 @@ def parse_service_request(service: str, protocol_hint: str = "") -> list[PortRan
         proto = proto.strip()
         if proto not in ("tcp", "udp", "sctp", "icmp", "ip"):
             raise ValueError(f"Unknown protocol in service {service!r}")
-        if proto in ("icmp", "ip"):
-            return [PortRange(proto, 0, 65535)]
+        if proto == "icmp":
+            return [PortRange("icmp", 0, 65535)]
+        if proto == "ip":
+            port_part_stripped = port_part.strip()
+            if not port_part_stripped or port_part_stripped == "0-65535":
+                return [WILDCARD_RANGE]
+            try:
+                num = int(port_part_stripped)
+            except ValueError:
+                raise ValueError(
+                    f"Unknown IP protocol number in service {service!r} — "
+                    "use ip/<number> e.g. ip/47 for GRE"
+                ) from None
+            return [PortRange("ip", num, num)]
         return [_parse_port_expr(port_part, proto)]
 
     if raw in _WELL_KNOWN:
@@ -200,7 +214,13 @@ class ServiceCatalog:
             # (unresolvable) so callers treat coverage as uncertain.
             proto_num = obj.get("protocol-number")
             if proto_num is not None:
-                _PROTO_NUM_MAP = {1: PortRange("icmp", 0, 65535)}
+                _PROTO_NUM_MAP = {
+                    1:  PortRange("icmp", 0, 65535),
+                    47: PortRange("ip", 47, 47),   # GRE
+                    50: PortRange("ip", 50, 50),   # ESP (IPSec)
+                    51: PortRange("ip", 51, 51),   # AH (IPSec)
+                    89: PortRange("ip", 89, 89),   # OSPF
+                }
                 pr = _PROTO_NUM_MAP.get(int(proto_num))
                 return [pr] if pr is not None else None
             return [WILDCARD_RANGE]
