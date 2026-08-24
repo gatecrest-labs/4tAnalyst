@@ -101,24 +101,48 @@ def test_get_adoms_wildcard_returns_all(monkeypatch):
 
 def test_get_central_snat_blocked_by_adom_guard():
     """get_central_snat rejects requests for ADOMs not in the token's allowed set."""
-    from fortimanager_mcp.server import mcp
-    import asyncio
+    from fortimanager_mcp import server as fmg_server
+
     token = allowed_adoms_var.set({"ALLOWED-ADOM"})
     try:
-        tools = asyncio.run(mcp.list_tools())
-        snat_tool = next(t for t in tools if t.name == "get_central_snat")
-        assert snat_tool is not None  # tool exists
+        result = fmg_server.get_central_snat(adom="OTHER-ADOM", pkg="some-pkg")
     finally:
         allowed_adoms_var.reset(token)
+
+    assert isinstance(result, dict)
+    assert "error" in result
+    assert "OTHER-ADOM" in result["error"]
+    assert result.get("error_code") == "forbidden"
 
 
 def test_get_central_dnat_blocked_by_adom_guard():
     """get_central_dnat rejects requests for ADOMs not in the token's allowed set."""
-    from fortimanager_mcp.server import mcp
-    import asyncio
-    tools = asyncio.run(mcp.list_tools())
-    dnat_tool = next(t for t in tools if t.name == "get_central_dnat")
-    assert dnat_tool is not None
+    from fortimanager_mcp import server as fmg_server
+
+    token = allowed_adoms_var.set({"ALLOWED-ADOM"})
+    try:
+        result = fmg_server.get_central_dnat(adom="OTHER-ADOM", pkg="some-pkg")
+    finally:
+        allowed_adoms_var.reset(token)
+
+    assert isinstance(result, dict)
+    assert "error" in result
+    assert "OTHER-ADOM" in result["error"]
+    assert result.get("error_code") == "forbidden"
+
+
+def test_get_central_snat_returns_empty_on_object_not_found():
+    """get_central_snat_rules returns [] when FortiManager returns code=-9 (object not found)."""
+    from fortimanager_mcp.client import FortiManagerClient, FortiManagerAPIError
+
+    c = FortiManagerClient(primary_host="h", primary_key="k")
+
+    def fake_get_all(path, extra_params=None):
+        raise FortiManagerAPIError("not found", code=-9)
+
+    c._get_all = fake_get_all
+    result = c.get_central_snat_rules("OT-ADOM", "some-pkg")
+    assert result == []
 
 
 def test_search_fqdn_rules_enforces_adom_guard(monkeypatch):

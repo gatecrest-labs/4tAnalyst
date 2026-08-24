@@ -483,7 +483,7 @@ class FortiManagerClient:
         Returns an empty list when no Central SNAT table is configured.
         Raises FortiManagerAPIError on connection or auth failure.
         """
-        path = f"/pm/config/adom/{adom}/pkg/{pkg}/central/nat/srcnat"
+        path = f"/pm/config/adom/{adom}/pkg/{pkg}/firewall/central-snat-map"
         try:
             result = self._get_all(path)
         except FortiManagerAPIError as exc:
@@ -498,7 +498,8 @@ class FortiManagerClient:
         Returns an empty list when no Central DNAT table is configured.
         Raises FortiManagerAPIError on connection or auth failure.
         """
-        path = f"/pm/config/adom/{adom}/pkg/{pkg}/central/nat/dstnat"
+        # VIPs are ADOM-scoped objects; pkg arg kept for API symmetry but not used in path
+        path = f"/pm/config/adom/{adom}/obj/firewall/vip"
         try:
             result = self._get_all(path)
         except FortiManagerAPIError as exc:

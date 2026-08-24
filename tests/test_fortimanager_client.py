@@ -297,7 +297,7 @@ def test_get_central_snat_uses_correct_path(mock_fmg_client):
 
     mock_fmg_client._rpc = capture_rpc
     mock_fmg_client.get_central_snat_rules("MY-ADOM", "PROD/DMZ/Policy")
-    assert any("MY-ADOM" in p and "PROD/DMZ/Policy" in p and "srcnat" in p for p in calls)
+    assert any("MY-ADOM" in p and "PROD/DMZ/Policy" in p and "central-snat-map" in p for p in calls)
 
 
 def test_get_central_dnat_uses_correct_path(mock_fmg_client):
@@ -310,4 +310,4 @@ def test_get_central_dnat_uses_correct_path(mock_fmg_client):
 
     mock_fmg_client._rpc = capture_rpc
     mock_fmg_client.get_central_dnat_rules("MY-ADOM", "PROD/DMZ/Policy")
-    assert any("MY-ADOM" in p and "PROD/DMZ/Policy" in p and "dstnat" in p for p in calls)
+    assert any("MY-ADOM" in p and "vip" in p and "obj" in p for p in calls)

@@ -714,6 +714,16 @@ def _service_append_alternative(
             dst_fulls = {d: matcher.addr_side(pol, "dstaddr", d)[1] for d in flow.dsts}
             if not all(src_fulls.values()) or not all(dst_fulls.values()):
                 continue
+            # Fix 2: negation guards — a negated side is a catch-all-except pattern;
+            # appending to it has undefined semantics and must never be suggested.
+            if pol.get("srcaddr-negate", "disable") in ("enable", 1, True):
+                continue
+            if pol.get("dstaddr-negate", "disable") in ("enable", 1, True):
+                continue
+            # Fix 3: specificity floor — skip any policy where both sides are catch-all;
+            # recommending to widen an all/all rule is unsafe.
+            if pol.get("srcaddr", ["all"]) == ["all"] and pol.get("dstaddr", ["all"]) == ["all"]:
+                continue
             _, svc_full = matcher.svc_side(pol, flow.service_ranges)
             if svc_full:
                 continue
@@ -739,7 +749,8 @@ def _service_append_alternative(
                     else:
                         port_expr = (str(req.start) if req.start == req.end
                                      else f"{req.start}-{req.end}")
-                        service_names.append(f"SVC-{req.protocol.upper()}-{port_expr}")
+                        # Fix 4: use canonical naming (SVC_TCP_9999 with underscores)
+                        service_names.append(standards.object_name("service", proto=req.protocol, port=port_expr))
                         warnings.append(
                             f"Verify service object for {req.protocol}/{port_expr} "
                             "exists in this ADOM."

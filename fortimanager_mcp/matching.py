@@ -129,6 +129,16 @@ def parse_service_request(service: str, protocol_hint: str = "") -> list[PortRan
                     f"Unknown IP protocol number in service {service!r} — "
                     "use ip/<number> e.g. ip/47 for GRE"
                 ) from None
+            # Fix 9: validate protocol number range
+            if num > 255:
+                raise ValueError(
+                    f"Invalid IP protocol number {num}: must be 0-255"
+                )
+            # Fix 8: normalize well-known protocol numbers to typed PortRanges
+            # so e.g. ip/1 matches ICMP catalog entries instead of being its own opaque type
+            _IP_PROTO_NORMALIZE = {1: PortRange("icmp", 0, 65535)}
+            if num in _IP_PROTO_NORMALIZE:
+                return [_IP_PROTO_NORMALIZE[num]]
             return [PortRange("ip", num, num)]
         return [_parse_port_expr(port_part, proto)]
 
