@@ -1299,6 +1299,54 @@ def test_group_append_alternative_skips_negated_destination_rule():
     assert fw.alternative is None or fw.alternative.policy_id != 99999
 
 
+def _fake_fmg_with_negated_src_rule():
+    """Fake FMG with a rule where srcaddr-negate:enable and the dst IS in an existing group.
+
+    The rule is a 'catch-all except these sources' style policy.  It should
+    not appear as an Option B candidate for the 'source' side even though the
+    destination and service match.
+    """
+    policies = [
+        {"policyid": 99997, "name": "negated-src-catch-all",
+         "status": "enable", "action": 1, "schedule": ["always"],
+         "srcaddr": ["H_GE_SRC"],
+         "srcaddr-negate": "enable",
+         "dstaddr": ["GRP_NEG_DST"],
+         "service": ["HTTPS"],
+         "srcintf": ["any"], "dstintf": ["any"], "logtraffic": 2},
+    ]
+    fmg = EngineFMG(policies=policies)
+    base = fmg.get_address_objects("root")
+    fmg.get_devices = lambda adom: [{"name": "FW01"}]
+    fmg.get_policy_packages = lambda adom: [
+        {"name": "pkgA", "scope member": [{"name": "FW01"}]}
+    ]
+    fmg.get_address_objects = lambda adom: base + [
+        {"name": "H_GE_SRC", "type": "ipmask", "subnet": "10.1.2.3/32"},
+        {"name": "H_GE_DST2", "type": "ipmask", "subnet": "10.9.8.7/32"},
+    ]
+    fmg.get_address_groups = lambda adom: [
+        {"name": "GRP_NEG_DST", "member": [{"name": "H_GE_DST2"}]},
+    ]
+    return fmg
+
+
+def test_group_append_alternative_skips_negated_source_side():
+    """A rule with srcaddr-negate:enable must not be suggested as Option B."""
+    fmg = _fake_fmg_with_negated_src_rule()
+    zc = EngineZone(verdict="ALLOWED")
+    plan = plan_change(
+        src="10.1.2.3", dst="10.9.8.7",
+        service="tcp/443",
+        firewalls=[TF(device="FW01", adom="TEST-ADOM")],
+        ticket_id="RITM-NEG-SRC",
+        fmg_client=fmg, zone_client=zc,
+    )
+    fw = plan.firewalls[0]
+    # The negated-src rule must not be suggested as Option B
+    assert fw.alternative is None or fw.alternative.policy_id != 99997
+
+
 def _minimal_change_plan(fw):
     """Build a minimal ChangePlan wrapping a single FirewallPlan for payload tests."""
     from planner.models import ChangePlan, NormalizedFlow

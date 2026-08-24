@@ -176,6 +176,17 @@ def render_conf(data: dict) -> str:
             elif alt.get("direct_cli"):
                 parts.append(alt["direct_cli"].replace("<TICKET_ID>", ticket))
                 parts.append("")
+        svc_alt = fw.get("service_alternative")
+        if svc_alt:
+            parts.append(f"# {'-' * 77}")
+            parts.append("# OPTION C -- amend service list on existing rule")
+            for w in svc_alt.get("warnings", []):
+                parts.append(f"# WARNING: {w}")
+            parts.append(f"# {'-' * 77}")
+            parts.append("")
+            if svc_alt.get("service_cli"):
+                parts.append(svc_alt["service_cli"].replace("<TICKET_ID>", ticket))
+                parts.append("")
     return "\n".join(parts)
 
 

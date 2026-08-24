@@ -87,6 +87,22 @@ def test_parse_unknown_raises():
         parse_service_request("no-such-service-xyz")
 
 
+def test_parse_ip1_normalizes_to_icmp():
+    """ip/1 (ICMP protocol number) must normalize to the icmp PortRange, not PortRange('ip', 1, 1)."""
+    result = parse_service_request("ip/1")
+    assert result == [PortRange("icmp", 0, 65535)], (
+        "ip/1 should normalize to icmp so it matches ICMP catalog entries"
+    )
+
+
+def test_parse_ip_out_of_range_raises():
+    """ip/N with N > 255 must raise ValueError — protocol numbers are 0-255."""
+    with pytest.raises(ValueError, match="must be 0-255"):
+        parse_service_request("ip/256")
+    with pytest.raises(ValueError, match="must be 0-255"):
+        parse_service_request("ip/999999")
+
+
 # ---------------------------------------------------------------------------
 # ServiceCatalog
 # ---------------------------------------------------------------------------
