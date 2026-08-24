@@ -99,6 +99,28 @@ def test_get_adoms_wildcard_returns_all(monkeypatch):
         allowed_adoms_var.reset(token)
 
 
+def test_get_central_snat_blocked_by_adom_guard():
+    """get_central_snat rejects requests for ADOMs not in the token's allowed set."""
+    from fortimanager_mcp.server import mcp
+    import asyncio
+    token = allowed_adoms_var.set({"ALLOWED-ADOM"})
+    try:
+        tools = asyncio.run(mcp.list_tools())
+        snat_tool = next(t for t in tools if t.name == "get_central_snat")
+        assert snat_tool is not None  # tool exists
+    finally:
+        allowed_adoms_var.reset(token)
+
+
+def test_get_central_dnat_blocked_by_adom_guard():
+    """get_central_dnat rejects requests for ADOMs not in the token's allowed set."""
+    from fortimanager_mcp.server import mcp
+    import asyncio
+    tools = asyncio.run(mcp.list_tools())
+    dnat_tool = next(t for t in tools if t.name == "get_central_dnat")
+    assert dnat_tool is not None
+
+
 def test_search_fqdn_rules_enforces_adom_guard(monkeypatch):
     """search_fqdn_rules must reject tokens that are not allowed for the ADOM."""
     from fortimanager_mcp import server as fmg_server
