@@ -76,3 +76,55 @@ def test_check_workaround_manual_when_empty_interface_list():
     client = _StubClient([])
     status = check_workaround("disable_http_https_admin_access", client, "OT-ADOM", "FW01")
     assert status == "manual_verification_required"
+
+
+# --- disable_gui_internet_facing pattern ---
+
+def test_match_workaround_pattern_recognizes_internet_facing_text():
+    key = match_workaround_pattern("Disable GUI access on internet-facing interfaces")
+    assert key == "disable_gui_internet_facing"
+
+
+def test_gui_internet_facing_not_in_place_public_ip_with_https():
+    # Public IP with HTTPS → workaround not in place
+    client = _StubClient([
+        {"name": "wan1", "ip": "203.0.113.1/24", "allowaccess": ["https", "ping"]},
+        {"name": "port1", "ip": "10.1.1.1/24", "allowaccess": ["https"]},
+    ])
+    status = check_workaround("disable_gui_internet_facing", client, "OT-ADOM", "FW01")
+    assert status == "not_in_place"
+
+
+def test_gui_internet_facing_in_place_public_ip_no_gui():
+    # Public IP but no HTTP/HTTPS → workaround in place
+    client = _StubClient([
+        {"name": "wan1", "ip": "203.0.113.1/24", "allowaccess": ["ping", "ssh"]},
+    ])
+    status = check_workaround("disable_gui_internet_facing", client, "OT-ADOM", "FW01")
+    assert status == "in_place"
+
+
+def test_gui_internet_facing_manual_when_only_private_ips():
+    # Only private IPs — cannot confirm internet-facing exposure
+    client = _StubClient([
+        {"name": "port1", "ip": "10.1.1.1/24", "allowaccess": ["https"]},
+        {"name": "port2", "ip": "192.168.0.1/24", "allowaccess": ["https"]},
+    ])
+    status = check_workaround("disable_gui_internet_facing", client, "OT-ADOM", "FW01")
+    assert status == "manual_verification_required"
+
+
+# --- configure_trusted_hosts pattern ---
+
+def test_match_workaround_pattern_recognizes_trusted_hosts_text():
+    key = match_workaround_pattern(
+        "Configure trusted hosts to restrict management access to specific IP addresses"
+    )
+    assert key == "configure_trusted_hosts"
+
+
+def test_trusted_hosts_always_returns_manual_verification():
+    # Trusted host verification requires system/admin queries not yet implemented
+    client = _StubClient([{"name": "port1", "allowaccess": ["https"]}])
+    status = check_workaround("configure_trusted_hosts", client, "OT-ADOM", "FW01")
+    assert status == "manual_verification_required"
