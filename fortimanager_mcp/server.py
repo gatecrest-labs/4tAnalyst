@@ -1,7 +1,7 @@
 """
 FortiManager MCP Server (7.4.x / 7.6.x compatible)
 
-Exposes seventeen read-only tools to Claude:
+Exposes nineteen read-only tools to Claude:
   - get_system_status           : FortiManager version, hostname, serial, platform
   - get_ha_status               : FortiManager HA cluster status
   - get_adoms                   : List all administrative domains
@@ -15,6 +15,8 @@ Exposes seventeen read-only tools to Claude:
   - get_interface_map           : Interface-to-zone mapping for a device
   - get_device_interface_config : Device-DB interface config with VLAN filtering
   - get_routing_table           : Static routing table for a device
+  - get_central_snat            : Central SNAT rules for a policy package
+  - get_central_dnat            : Central DNAT (VIP) rules for a policy package
   - list_device_vdoms           : VDOMs configured on a device
   - get_device_client_location  : Locate a client on detected-client inventory
   - get_device_sdwan            : Device-DB SD-WAN config (zones, members, health-checks)
@@ -592,6 +594,60 @@ def get_routing_table(adom: str, device: str) -> list[dict[str, Any]]:
     except Exception as e:
         message, code = safe_error(e)
         return [{"error": message, "error_code": code}]
+
+
+# ---------------------------------------------------------------------------
+# Tool: get_central_snat
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def get_central_snat(adom: str, pkg: str) -> list[dict] | dict:
+    """List all Central SNAT rules for a policy package.
+
+    Use this to investigate source NAT translation for outbound flows — e.g.
+    which internal host is NAT'd to which IP pool, and whether a given address
+    pair already has SNAT coverage.
+
+    Args:
+        adom: Administrative domain name (e.g. "OT-ADOM")
+        pkg:  Full policy package path (e.g. "PRODUCTION/Perimeter/DMZ (Internet)/DMZXFW_Policy")
+    """
+    adom, _, err = _validate_or_error(adom)
+    if err:
+        return err
+    try:
+        with _fortimanager_client() as c:
+            return c.get_central_snat_rules(adom, pkg)
+    except Exception as e:
+        message, code = safe_error(e)
+        return {"error": message, "error_code": code}
+
+
+# ---------------------------------------------------------------------------
+# Tool: get_central_dnat
+# ---------------------------------------------------------------------------
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def get_central_dnat(adom: str, pkg: str) -> list[dict] | dict:
+    """List all Central DNAT rules (VIPs) for a policy package.
+
+    Use this to investigate destination NAT translation for inbound flows — e.g.
+    which external IP maps to which internal host, and whether an inbound flow
+    already has DNAT coverage via an existing VIP.
+
+    Args:
+        adom: Administrative domain name (e.g. "OT-ADOM")
+        pkg:  Full policy package path (e.g. "PRODUCTION/Perimeter/DMZ (Internet)/DMZXFW_Policy")
+    """
+    adom, _, err = _validate_or_error(adom)
+    if err:
+        return err
+    try:
+        with _fortimanager_client() as c:
+            return c.get_central_dnat_rules(adom, pkg)
+    except Exception as e:
+        message, code = safe_error(e)
+        return {"error": message, "error_code": code}
 
 
 # ---------------------------------------------------------------------------
