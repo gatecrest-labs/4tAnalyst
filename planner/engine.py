@@ -553,6 +553,8 @@ def _group_append_alternative(
                     continue
                 if pol.get(f"{key}-negate", "disable") in ("enable", 1, True):
                     continue  # appending to a negated side REMOVES access
+                if pol.get(f"{other_key}-negate", "disable") in ("enable", 1, True):
+                    continue  # non-failing side is inverted; append semantics are undefined
 
                 other_refs = list(_ref_names(pol.get(other_key, [])))
                 non_all_count = sum(1 for ref in other_refs if ref.lower() != "all")
