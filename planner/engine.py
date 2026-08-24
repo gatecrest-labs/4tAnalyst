@@ -46,6 +46,7 @@ from planner.models import (
     NormalizedFlow,
     ObjectPlan,
     PlannerDataError,
+    ServiceAppendAlternative,
     TargetFirewall,
 )
 from zone_mcp.client import ZonePolicyClient
@@ -129,11 +130,25 @@ def _address_object_plan(role: str, ip: str, snapshot: DeviceSnapshot) -> Object
 
 
 def _service_object_plan(token: str, snapshot: DeviceSnapshot) -> ObjectPlan:
+    from fortimanager_mcp.matching import WILDCARD_RANGE
     ranges = parse_service_request(token)
-    if any(r.protocol == "ip" for r in ranges):
-        # wildcard service — FortiGate's built-in ALL object, never created
+    # Only the true wildcard (all protocols) maps to FortiGate's built-in ALL
+    if ranges == [WILDCARD_RANGE]:
         return ObjectPlan(role="service", action="reuse", name="ALL",
                           obj_type="service", value=token)
+    # Specific IP protocol number (e.g. ip/47 = GRE, ip/50 = ESP)
+    if len(ranges) == 1 and ranges[0].protocol == "ip":
+        proto_num = ranges[0].start
+        existing = snapshot.svc_catalog.exact_match_name(ranges)
+        if existing:
+            return ObjectPlan(role="service", action="reuse", name=existing,
+                              obj_type="service", value=token)
+        name = f"IP-PROTO-{proto_num}"
+        return ObjectPlan(
+            role="service", action="create", name=name, obj_type="service",
+            value=f"ip/{proto_num}",
+            cli=cli_gen.ip_protocol_object_cli(name, proto_num),
+        )
     existing = snapshot.svc_catalog.exact_match_name(ranges)
     if existing:
         return ObjectPlan(role="service", action="reuse", name=existing,
@@ -424,6 +439,17 @@ def _plan_firewall(
                 "the rule's source address list would cover this flow without a new policy "
                 "(only this rule is affected). Choose ONE option."
             )
+
+    fw.service_alternative = _service_append_alternative(fw, snapshot, matcher, flow)
+    if fw.service_alternative:
+        svc_alt = fw.service_alternative
+        svc_str = ", ".join(svc_alt.services_to_add)
+        fw.warnings.append(
+            f"Option C: rule #{svc_alt.policy_id} {svc_alt.policy_name!r} already covers "
+            f"the correct addresses — appending {svc_str} to its service list "
+            "would cover this flow without a new policy. Choose ONE option."
+        )
+
     return fw
 
 
@@ -527,6 +553,8 @@ def _group_append_alternative(
                     continue
                 if pol.get(f"{key}-negate", "disable") in ("enable", 1, True):
                     continue  # appending to a negated side REMOVES access
+                if pol.get(f"{other_key}-negate", "disable") in ("enable", 1, True):
+                    continue  # non-failing side is inverted; append semantics are undefined
 
                 other_refs = list(_ref_names(pol.get(other_key, [])))
                 non_all_count = sum(1 for ref in other_refs if ref.lower() != "all")
@@ -651,6 +679,100 @@ def _group_blast_radius(
                         "via": via,
                     })
     return affected, warnings
+
+
+def _service_append_alternative(
+    fw: FirewallPlan,
+    snapshot,
+    matcher: PolicyMatcher,
+    flow: NormalizedFlow,
+) -> "ServiceAppendAlternative | None":
+    """Find the best near-miss rule where addresses are fully covered but service is gapped.
+
+    Returns the most address-specific qualifying candidate (highest non-'all' ref count),
+    or None if no such rule exists.
+    """
+    from fortimanager_mcp.matching import WILDCARD_RANGE
+    from planner.insertion import _intf_scoped
+
+    best: ServiceAppendAlternative | None = None
+    best_score = -1
+
+    for pkg, policies in snapshot.policies_by_package.items():
+        for pol in policies:
+            results = [matcher.evaluate(pol, s, d, flow.service_ranges)
+                       for s, d in flow.pairs]
+            r = results[0]
+            if (r.disabled or r.conditional_schedule or r.action != "accept"
+                    or any(x.unknown_refs for x in results)
+                    or all(x.full_cover for x in results)):
+                continue
+            if not _intf_scoped(pol, fw.srcintf, fw.dstintf):
+                continue
+            # Both address sides must be fully covered — only the service is gapped
+            src_fulls = {s: matcher.addr_side(pol, "srcaddr", s)[1] for s in flow.srcs}
+            dst_fulls = {d: matcher.addr_side(pol, "dstaddr", d)[1] for d in flow.dsts}
+            if not all(src_fulls.values()) or not all(dst_fulls.values()):
+                continue
+            # Fix 2: negation guards — a negated side is a catch-all-except pattern;
+            # appending to it has undefined semantics and must never be suggested.
+            if pol.get("srcaddr-negate", "disable") in ("enable", 1, True):
+                continue
+            if pol.get("dstaddr-negate", "disable") in ("enable", 1, True):
+                continue
+            # Fix 3: specificity floor — skip any policy where both sides are catch-all;
+            # recommending to widen an all/all rule is unsafe.
+            if pol.get("srcaddr", ["all"]) == ["all"] and pol.get("dstaddr", ["all"]) == ["all"]:
+                continue
+            _, svc_full = matcher.svc_side(pol, flow.service_ranges)
+            if svc_full:
+                continue
+            missing = matcher.uncovered_services(pol, flow.service_ranges)
+            if not missing:
+                continue
+            service_names = []
+            warnings: list[str] = []
+            for req in missing:
+                if req == WILDCARD_RANGE:
+                    service_names.append("ALL")
+                else:
+                    existing = snapshot.svc_catalog.exact_match_name([req])
+                    if existing:
+                        service_names.append(existing)
+                    elif req.protocol == "ip":
+                        name = f"IP-PROTO-{req.start}"
+                        service_names.append(name)
+                        warnings.append(
+                            f"Service object {name!r} (ip/{req.start}) may not exist — "
+                            "check for a built-in or create it before using this option."
+                        )
+                    else:
+                        port_expr = (str(req.start) if req.start == req.end
+                                     else f"{req.start}-{req.end}")
+                        # Fix 4: use canonical naming (SVC_TCP_9999 with underscores)
+                        service_names.append(standards.object_name("service", proto=req.protocol, port=port_expr))
+                        warnings.append(
+                            f"Verify service object for {req.protocol}/{port_expr} "
+                            "exists in this ADOM."
+                        )
+            # Score by address specificity (prefer rules with more exact refs over broad ones)
+            all_refs = (
+                list(_ref_names(pol.get("srcaddr", [])))
+                + list(_ref_names(pol.get("dstaddr", [])))
+            )
+            non_all = sum(1 for ref in all_refs if ref.lower() != "all")
+            if non_all > best_score:
+                best_score = non_all
+                best = ServiceAppendAlternative(
+                    package=pkg,
+                    policy_id=pol.get("policyid", 0),
+                    policy_name=pol.get("name", ""),
+                    services_to_add=service_names,
+                    service_cli=cli_gen.policy_svc_append_cli(
+                        pol.get("policyid", 0), service_names),
+                    warnings=warnings,
+                )
+    return best
 
 
 # ---------------------------------------------------------------------------
@@ -990,6 +1112,22 @@ def to_report_payload(plan: ChangePlan) -> dict:
                 "direct_cli": alt.direct_cli,
                 "affected_rules": alt.affected_policies,
                 "warnings": alt.warnings,
+            }
+        if fw.service_alternative:
+            svc_alt = fw.service_alternative
+            entry["service_alternative"] = {
+                "summary": (
+                    f"Extend existing rule #{svc_alt.policy_id} "
+                    f"{svc_alt.policy_name!r} (package {svc_alt.package!r}) by "
+                    f"appending {', '.join(svc_alt.services_to_add)} to its service "
+                    "list instead of creating a new policy. Choose ONE option, not both."
+                ),
+                "package": svc_alt.package,
+                "policy_id": svc_alt.policy_id,
+                "policy_name": svc_alt.policy_name,
+                "services_to_add": svc_alt.services_to_add,
+                "service_cli": svc_alt.service_cli,
+                "warnings": svc_alt.warnings,
             }
         per_firewall.append(entry)
 

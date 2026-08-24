@@ -16,6 +16,52 @@ _SEVERITY_FALLBACK = {
     "critical": "critical", "high": "high", "medium": "medium", "low": "low",
 }
 
+# Phrases that positively indicate active exploitation in advisory text.
+_EXPLOITED_POSITIVE = frozenset({
+    "actively exploited",
+    "exploitation in the wild",
+    "exploited in the wild",
+    "being exploited",
+    "has been exploited",
+    "was exploited",
+    "exploitation has been detected",
+    "exploitation detected",
+    "confirmed exploitation",
+    "reported exploitation",
+    "exploitation observed",
+    "is being exploited",
+    "instance of exploitation",
+    "instances of exploitation",
+})
+
+# Phrases that explicitly negate exploitation — take precedence over positive matches.
+_EXPLOITED_NEGATIVE = frozenset({
+    "not aware of",
+    "no known exploitation",
+    "not exploited",
+    "no exploitation",
+    "not been exploited",
+    "no active exploit",
+    "is not being exploited",
+    "not actively exploited",
+    "no reports of exploitation",
+})
+
+
+def _indicates_exploitation(text: str) -> bool:
+    """Return True only if advisory text contains positive exploitation language.
+
+    A non-empty string is NOT sufficient — advisories commonly include phrases
+    like "Fortinet is not aware of exploitation in the wild" which must NOT
+    trigger the HIGH escalation. Negative qualifiers take precedence.
+    """
+    t = (text or "").lower()
+    if not t:
+        return False
+    if any(neg in t for neg in _EXPLOITED_NEGATIVE):
+        return False
+    return any(pos in t for pos in _EXPLOITED_POSITIVE)
+
 
 def _cvss_band(score: float) -> str:
     if score >= 9.0:
@@ -47,7 +93,7 @@ def compute_priority(
         base = _SEVERITY_FALLBACK.get((fortinet_severity or "").strip().lower(), "medium")
         base_reason = f"no CVSS score extracted; used Fortinet's own severity rating ({fortinet_severity or 'unspecified'})"
 
-    exploited = bool((exploited_in_wild_text or "").strip())
+    exploited = _indicates_exploitation(exploited_in_wild_text)
     forced_reasons = []
     if exploited:
         forced_reasons.append("advisory states exploitation in the wild")

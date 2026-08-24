@@ -244,6 +244,8 @@ def _register_existing_tools() -> None:
         fmg.get_policy,
         fmg.get_interface_map,
         fmg.get_routing_table,
+        fmg.get_central_snat,
+        fmg.get_central_dnat,
         fmg.list_device_vdoms,
         fmg.get_device_interface_config,
         fmg.get_device_client_location,

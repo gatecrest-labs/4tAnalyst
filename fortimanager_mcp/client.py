@@ -474,6 +474,41 @@ class FortiManagerClient:
         return routes
 
     # ------------------------------------------------------------------
+    # Central NAT tables
+    # ------------------------------------------------------------------
+
+    def get_central_snat_rules(self, adom: str, pkg: str) -> list[dict]:
+        """List all Central SNAT rules for a policy package.
+
+        Returns an empty list when no Central SNAT table is configured.
+        Raises FortiManagerAPIError on connection or auth failure.
+        """
+        path = f"/pm/config/adom/{adom}/pkg/{pkg}/firewall/central-snat-map"
+        try:
+            result = self._get_all(path)
+        except FortiManagerAPIError as exc:
+            if exc.code == -9:  # object not found — no central NAT table
+                return []
+            raise
+        return [r for r in result if isinstance(r, dict)]
+
+    def get_central_dnat_rules(self, adom: str, pkg: str) -> list[dict]:
+        """List all Central DNAT rules (VIPs) for a policy package.
+
+        Returns an empty list when no Central DNAT table is configured.
+        Raises FortiManagerAPIError on connection or auth failure.
+        """
+        # VIPs are ADOM-scoped objects; pkg arg kept for API symmetry but not used in path
+        path = f"/pm/config/adom/{adom}/obj/firewall/vip"
+        try:
+            result = self._get_all(path)
+        except FortiManagerAPIError as exc:
+            if exc.code == -9:  # object not found — no central NAT table
+                return []
+            raise
+        return [r for r in result if isinstance(r, dict)]
+
+    # ------------------------------------------------------------------
     # Context manager support
     # ------------------------------------------------------------------
 

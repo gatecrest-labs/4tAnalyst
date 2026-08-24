@@ -116,7 +116,7 @@ python -m fwanalyst_server.admin create-user <username> --role admin|viewer
 
 **`query.py`** — high-level query helpers consumed by `server.py`. `search_policies` returns a structured dict `{policies, packages_searched, packages_failed, degraded}` — when `degraded` is True an empty match list must NOT be read as "no rule exists".
 
-**`server.py`** — FastMCP exposing 17 read-only tools. All tools that accept an `adom` parameter call `_require_adom(adom)` as their first line — hard-erroring if the caller's token is not allowed for that ADOM. `get_adoms()` silently filters the returned list to the caller's allowed set. In stdio/dev mode (no HTTP middleware, `allowed_adoms_var` unset) all tools default to full access.
+**`server.py`** — FastMCP exposing 19 read-only tools. All tools that accept an `adom` parameter call `_require_adom(adom)` as their first line — hard-erroring if the caller's token is not allowed for that ADOM. `get_adoms()` silently filters the returned list to the caller's allowed set. In stdio/dev mode (no HTTP middleware, `allowed_adoms_var` unset) all tools default to full access.
 - `get_system_status`, `get_ha_status` — FortiManager version/hostname/serial and HA cluster status (no ADOM param — not guarded)
 - `get_adoms`, `get_devices`, `search_devices` — discovery (search_devices filters get_devices client-side by name/platform/OS/connection status)
 - `search_policies(adom, device, src_ip, dst_ip, service)` — structured set-semantics policy search
@@ -130,6 +130,8 @@ python -m fwanalyst_server.admin create-user <username> --role admin|viewer
 - `get_device_client_location(adom, device, ip, mac, hostname)` — locate a client on detected-client inventory
 - `get_device_sdwan(adom, device, vdom)` — Device-DB SD-WAN config (zones, members, health-checks)
 - `get_device_sdwan_monitor(adom, device)` — live SD-WAN runtime status (link state, bandwidth, SLA)
+- `get_central_snat(adom, pkg)` — Central SNAT rules for outbound NAT investigation
+- `get_central_dnat(adom, pkg)` — Central DNAT rules/VIPs for inbound NAT investigation
 
 FortiManager version flag in `credentials.yaml` controls `version: "7.4"` vs `"7.6"` policy path behaviour.
 
