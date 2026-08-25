@@ -17,6 +17,8 @@ returns** — not verdicts, not object names, not CLI text, not insertion
 points. If something looks wrong, say so to the engineer and flag it with
 `flag_for_review`; do not "fix" it yourself.
 
+> **Workstation mode:** All analysis steps use MCP tools exclusively via the `4tanalyst` MCP server. Do NOT attempt to install packages or import MCP modules locally. The one exception is Step 4: `scripts/render_report.py` is stdlib-only and MUST be run locally with `python3` to write the report files to the engineer's workstation.
+
 ## Workflow
 
 ### Step 1 — Gather request details
@@ -60,7 +62,7 @@ relay the message and ask the engineer how to proceed.
 
 ### Step 3 — Present the result
 Present the payload's sections in this order, verbatim (reformat into
-tables/headers, but never alter values):
+tables/headers, but never alter values). Deduplicate by src×dst×service — do not repeat a row already shown.
 
 1. **Warnings first** — if `warnings` mentions degraded FortiManager data,
    lead with it: coverage conclusions are not trustworthy until re-run.
@@ -82,6 +84,8 @@ tables/headers, but never alter values):
    affected-rules list.
 8. **Recommendation** — quote the planner's recommendation text.
 
+**If `plan_change` fails (connection drop or timeout):** Retry once. If it fails again, save any completed results, document the pending work clearly in the conversation, and ask the engineer to verify the server is up (`docker compose ps` or `systemctl status 4tanalyst`). As a fallback when the MCP server is unreachable, the planner can be run directly on the server: `uv run python -m planner --src <src> --dst <dsts> --service <svc> --firewall <fw:adom> --ticket <ticket>`.
+
 ### Step 4 — Generate artifacts
 Determine the output subdirectory name: use the ticket_id from the payload if
 present, otherwise use today's date+time in `YYYY-MM-DD_HHMM` format (match
@@ -92,8 +96,11 @@ file — this preserves the raw planner data for inspection alongside the
 report). Then run:
 
 ```
-uv run python scripts/render_report.py --data output/<subdir>/payload.json --outdir output/
+uv run python scripts/render_report.py --data output/<subdir>/payload.json --outdir output/ \
+  --model "<active-model-name>" --cost-usd "<estimated-cost>"
 ```
+
+Replace `<active-model-name>` with the model powering this session (e.g. `"Claude Sonnet 5"`, `"Claude Opus 5"`) — visible in the Claude Code status bar or `/config`. Replace `<estimated-cost>` with a rough USD estimate for this session (e.g. `"0.08"` for a typical single-firewall analysis at Sonnet pricing; omit the flag entirely if unknown).
 
 It prints the `report.html` and `implementation.conf` paths on success.
 Tell the engineer:
