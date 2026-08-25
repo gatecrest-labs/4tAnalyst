@@ -1,6 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+build/
+
 # Local Claude Code settings (hooks, personal MCP config) — never overwrite on pull
 .claude/settings.local.json
 # Project-level Claude Code permissions (machine-specific paths, not portable)
 .claude/settings.json
 # Runtime user database — contains password hashes, never commit
 data/users.json
+
+# Generated output
+output/
+graphify-out/
+
+# Local docs (superpowers skill content — not project docs)
+docs/superpowers/
