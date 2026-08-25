@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Install all packages (run from repo root)
 uv pip install -e mcp_common/ -e standards_mcp/ -e fortimanager_mcp/ -e feedback_mcp/ \
-    -e intake_mcp/ -e zone_mcp/ -e planner/ -e fwanalyst_server/
+    -e intake_mcp/ -e zone_mcp/ -e planner/ -e psirt/ -e psirt_mcp/ -e fwanalyst_server/
 
 # Run the deterministic planner directly (no LLM, no server needed)
 uv run python -m planner --src 10.1.2.3 --dst 10.9.8.7 --service tcp/8443 \
@@ -67,6 +67,7 @@ python -m fwanalyst_server.admin create-user <username> --role admin|viewer
 | `feedback_mcp` | **Complete** | SQLite decision/audit store with similarity lookup |
 | `intake_mcp` | **Complete** | .xlsx parser + manual entry normaliser |
 | `zone_mcp` | **Complete** | Live 4THealth zone policy API (IP→zone + verdict) |
+| `psirt` / `psirt_mcp` | **New** | Deterministic PSIRT advisory assessment — matches Fortinet advisory version ranges + workarounds against the live fleet (FortiGate + FortiManager), exploit-aware priority scoring, HTML report. No auto-remediation. |
 | `mcp_common` | **Complete** | Shared input validation, sanitized errors, and log masking used by fortimanager_mcp |
 | `netbrain_mcp` | **Planned** | Automated path discovery — blocked on NetBrain API access |
 
@@ -148,6 +149,18 @@ FortiManager version flag in `credentials.yaml` controls `version: "7.4"` vs `"7
 - `get_policies()` — raw policy table (161 policies, live)
 - `find_zone_for_ip(ip)` — IP→zone resolution via self-query trick
 - `check_ip_traffic(src_ip, dst_ip, service)` — **primary tool** for one-call IP verdict + zone context
+
+### psirt/ (deterministic core) + psirt_mcp/ (MCP wrapper)
+
+- **`psirt/models.py`** — `Advisory`, `AffectedRange`, `DeviceFinding`, `PsirtAssessment`, `PsirtDataError`.
+- **`psirt/version_match.py`** — FortiOS/FortiManager `MAJOR.MINOR.PATCH` version comparison; unparseable syntax raises `VersionMatchError`, never defaults to "not affected".
+- **`psirt/scoring.py`** — deterministic priority: CVSS band (or Fortinet's own severity if no CVSS was extracted), forced to at least High on confirmed/likely exploitation (advisory text or CISA KEV hit), downgraded to informational if the fleet has zero exposure.
+- **`psirt/workaround_checks.py`** — registry mapping recognized workaround text patterns to FortiManager config checks (starts with one: HTTP/HTTPS admin-access interface restriction). Unrecognized workaround text returns `manual_verification_required`, never a guessed status.
+- **`psirt/enrich.py`** — best-effort fortiguard.com advisory page fetch + CISA KEV catalog cross-check; never raises, sets `enrichment_degraded` on failure.
+- **`psirt/engine.py`** — `assess(advisory, fmg_client, http_client, kev_url) -> PsirtAssessment`, the single entry point.
+- **`psirt_mcp/server.py`** — FastMCP wrapper exposing `parse_advisory` (validates the calling model's structured extraction of a PSIRT email — this package does not call an LLM itself), `assess_fleet_exposure`, `render_psirt_report`. Registered into `fwanalyst_server`.
+
+No auto-remediation: output is HTML analysis only, unlike the firewall-change planner. See `docs/superpowers/specs/2026-08-23-psirt-advisory-assessment-design.md` for the full design.
 
 ### feedback_mcp/
 
@@ -286,6 +299,7 @@ See `todo.md` for the full list. Top blockers:
 - `/generate-peer-review` — structured second-engineer sign-off package
 - `/record-decision` — write audit entry to feedback_mcp
 - `/missing-info` — triage incomplete requests and draft follow-up
+- `/analyze-psirt` — assess a Fortinet PSIRT advisory email against the fleet: per-device no-action/config-change/upgrade verdict, exploit-aware priority, HTML report under `output/`
 
 ## Phase roadmap (revised)
 

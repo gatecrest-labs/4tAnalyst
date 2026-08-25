@@ -118,6 +118,8 @@ sudo systemctl restart 4tanalyst
 sudo systemctl status 4tanalyst
 ```
 
+> **Cache warmup:** After the first start (or after a pull that refreshes the FortiManager cache), the server runs a background warmup that fetches all ADOM policy data. This takes 2–5 minutes depending on ADOM count. `curl` checks during this window will return 504 — this is expected. Wait until `sudo journalctl -u 4tanalyst -f` stops showing `HTTP Request: POST https://<fmg>/jsonrpc` lines before running the verification checks.
+
 Verify the admin UI is reachable locally:
 
 ```bash
@@ -218,6 +220,30 @@ curl -s -o /dev/null -w "Admin: %{http_code}\n" http://localhost:8000/admin/logi
 # No errors in the last 50 log lines
 sudo journalctl -u 4tanalyst -n 50 --no-pager | grep -i error || echo "No errors"
 ```
+
+---
+
+## Troubleshooting
+
+**Server hangs after the first MCP connection (all requests time out)**
+
+This is the UsageMiddleware event loop bug (fixed in commit `13fad51`). The asyncio
+event loop blocks because `replay_receive()` loops forever instead of returning
+`http.disconnect`. Confirm the fix is present:
+
+```bash
+sudo grep -A3 "if not replayed" /opt/4tanalyst/fwanalyst_server/usage_middleware.py
+```
+
+You should see `return await receive()` at the end. If you see `return last_msg` instead,
+pull the fix:
+
+```bash
+sudo -u 4tanalyst git -C /opt/4tanalyst pull origin main
+sudo systemctl restart 4tanalyst
+```
+
+If the fix is not yet on main, merge development → main in GitLab first.
 
 ---
 

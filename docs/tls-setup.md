@@ -23,7 +23,11 @@ export FW_ANALYST_SSL_KEYFILE=/etc/4tanalyst/tls/server.key
 
 Setting both env vars is sufficient: `fwanalyst_server/__main__.py` starts uvicorn with `ssl_certfile=`/`ssl_keyfile=` when they are present. The equivalent `credentials.yaml` keys are `server.ssl_certfile` / `server.ssl_keyfile`; the environment variables win, matching the precedence used for `FW_ANALYST_TOKEN` and `FW_ANALYST_ALLOWED_HOSTS`. Set **both or neither** — setting only one is a configuration error and the server refuses to start rather than silently falling back to plain HTTP.
 
+> **Warning:** If nginx is handling TLS termination (Options A and B below), do NOT set `ssl_certfile`/`ssl_keyfile` in `credentials.yaml` or as environment variables. Those settings are only for the direct-uvicorn-TLS path.
+
 **Critical coupling — do not skip this:** the hostname engineers connect to (the TLS cert's CN/SAN) must also be added to `FW_ANALYST_ALLOWED_HOSTS` (or `credentials.yaml` `server.allowed_hosts`). DNS-rebinding protection checks the `Host` header against that allowlist independently of TLS — a valid cert with an unlisted hostname still gets every engineer request rejected. See [Configuration](configuration.md) for `FW_ANALYST_ALLOWED_HOSTS`.
+
+> **Note:** When nginx is terminating TLS, set `allowed_hosts` to the bare hostname with no port — e.g. `["4tanalyst.xcelenergy.com"]`, not `["4tanalyst.xcelenergy.com:8000"]`. The `:port` form is only correct when engineers connect directly to uvicorn.
 
 With this approach the server listens on 443 directly (or another port of your choosing) — there is no separate nginx `location /mcp` config to keep in sync, and no `127.0.0.1:8000`-only lockdown step. Firewall/security-group rules should still restrict inbound access to the engineer subnet.
 
@@ -56,6 +60,10 @@ sudo systemctl start nginx
 
 ```bash
 sudo mkdir -p /etc/4tanalyst/tls
+sudo chown root:4tanalyst /etc/4tanalyst
+sudo chmod 750 /etc/4tanalyst
+sudo chown root:4tanalyst /etc/4tanalyst/tls
+sudo chmod 750 /etc/4tanalyst/tls
 sudo openssl req -x509 -nodes -newkey rsa:4096 \
   -keyout /etc/4tanalyst/tls/server.key \
   -out /etc/4tanalyst/tls/server.crt \
@@ -64,6 +72,8 @@ sudo openssl req -x509 -nodes -newkey rsa:4096 \
   -addext "subjectAltName=IP:<server-ip>"
 sudo chmod 600 /etc/4tanalyst/tls/server.key
 ```
+
+> **Note:** Both the parent directory and `tls/` subdirectory must be group-accessible to the `4tanalyst` service account — a common miss that causes `PermissionError` on startup.
 
 Replace `<server-ip>` with the server's IP address (e.g. `10.0.0.1`). The SAN extension is required — modern clients reject certs without it.
 
@@ -89,6 +99,24 @@ server {
         proxy_set_header   Connection "";
         proxy_buffering    off;
         proxy_read_timeout 300s;
+    }
+
+    location /admin {
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_buffering    off;
+        proxy_read_timeout 60s;
+    }
+
+    location /api {
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_buffering    off;
+        proxy_read_timeout 60s;
     }
 }
 
@@ -151,12 +179,18 @@ This is the correct approach for production. Your organization's CA is already t
 
 ```bash
 sudo mkdir -p /etc/4tanalyst/tls
+sudo chown root:4tanalyst /etc/4tanalyst
+sudo chmod 750 /etc/4tanalyst
+sudo chown root:4tanalyst /etc/4tanalyst/tls
+sudo chmod 750 /etc/4tanalyst/tls
 sudo openssl req -new -newkey rsa:4096 -nodes \
   -keyout /etc/4tanalyst/tls/server.key \
   -out /etc/4tanalyst/tls/server.csr \
   -subj "/CN=<server-hostname-or-ip>/O=<your-org>"
 sudo chmod 600 /etc/4tanalyst/tls/server.key
 ```
+
+> **Note:** Both the parent directory and `tls/` subdirectory must be group-accessible to the `4tanalyst` service account — a common miss that causes `PermissionError` on startup.
 
 If your CA requires a SAN extension in the CSR, create an extensions file first:
 
@@ -215,6 +249,24 @@ server {
         proxy_set_header   Connection "";
         proxy_buffering    off;
         proxy_read_timeout 300s;
+    }
+
+    location /admin {
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_buffering    off;
+        proxy_read_timeout 60s;
+    }
+
+    location /api {
+        proxy_pass         http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host $host;
+        proxy_set_header   X-Real-IP $remote_addr;
+        proxy_buffering    off;
+        proxy_read_timeout 60s;
     }
 }
 
