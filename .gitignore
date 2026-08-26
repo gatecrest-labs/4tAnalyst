@@ -12,6 +12,10 @@ build/
 .claude/settings.json
 # Runtime user database — contains password hashes, never commit
 data/users.json
+# Runtime analytics DB — generated locally, never commit
+data/analytics.db
+data/analytics.db-shm
+data/analytics.db-wal
 
 # Generated output
 output/

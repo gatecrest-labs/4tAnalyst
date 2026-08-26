@@ -62,10 +62,20 @@ and must pass before merge:
   suppressing the check
 - **`smoke-tests`** — containerised, auth-aware checks (`scripts/run_smoke.py`)
   against the unified server built from `docker-compose.ci.yml`
+- **`sensitive-string-check`** (`.github/workflows/sensitive-string-check.yml`)
+  — this repo is public; blocks any push/PR that reintroduces the redacted
+  former employer's name/domain (see `scripts/check-sensitive-strings.sh` —
+  the target strings are stored base64-encoded there, and any match is
+  redacted from the check's own output, so nothing plaintext ever appears in
+  a commit, a PR diff, or a CI log)
 
 A PR that fails any of these gates will not be merged. If you add a new MCP
 server or dependency, run `pip-audit` locally first so vulnerable pins are
 caught before CI does.
+
+Run `git config core.hooksPath .githooks` once after cloning to enable the
+local pre-commit hook, which runs the same check before every commit
+(bypass with `git commit --no-verify` if it's a false positive).
 
 ## Running servers locally for development
 
