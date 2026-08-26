@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! scripts/check-sensitive-strings.sh --staged; then
+    echo "" >&2
+    echo "Commit blocked: remove the flagged reference(s) above, or bypass with 'git commit --no-verify' if it's a false positive." >&2
+    exit 1
+fi

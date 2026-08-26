@@ -12,6 +12,10 @@ build/
 .claude/settings.json
 # Runtime user database — contains password hashes, never commit
 data/users.json
+# Runtime analytics DB — generated locally, never commit
+data/analytics.db
+data/analytics.db-shm
+data/analytics.db-wal
 
 # Generated output
 output/
@@ -19,3 +23,15 @@ graphify-out/
 
 # Local docs (superpowers skill content — not project docs)
 docs/superpowers/
+docs/test-results/
+
+# Secrets and site-specific config — copy from the .example templates instead
+credentials.yaml
+device_zone_map.yaml
+
+# Generated policy DB — rebuild via standards_mcp/build_policy_db.py
+standards_mcp/policy_db.json
+standards_mcp/policy-data/
+
+# macOS
+.DS_Store
