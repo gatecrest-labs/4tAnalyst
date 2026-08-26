@@ -33,5 +33,9 @@ device_zone_map.yaml
 standards_mcp/policy_db.json
 standards_mcp/policy-data/
 
+# Local Claude Code hook scripts — machine-specific, not portable
+scripts/claude-sensitive-check.sh
+.githooks/post-commit
+
 # macOS
 .DS_Store
