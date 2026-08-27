@@ -295,6 +295,16 @@ def _plan_firewall(
                 if len(full_pairs) < len(pairs):
                     summary["covered_pairs"] = [f"{s} -> {d}" for s, d in full_pairs]
                 fw.covering_rules.append(summary)
+                policy_id = pol.get("policyid", 0)
+                for p in full_pairs:
+                    if results[p].broad_cover:
+                        msg = (
+                            f"Rule {policy_id} covers {p[0]} via a subnet broader "
+                            f"than /24 — verify that {p[0]} is intentionally within "
+                            "this group's scope before treating as already covered."
+                        )
+                        if msg not in fw.warnings:
+                            fw.warnings.append(msg)
             else:
                 # Skip disabled rules — they have no effect on traffic.
                 if any_r.disabled:
