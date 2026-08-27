@@ -624,6 +624,51 @@ def test_device_not_found_flagged():
     assert plan.cli_status == "new_rule"  # cannot prove coverage
 
 
+def test_broad_subnet_already_covered_warns():
+    """Coverage via /16 supernet keeps status=already_covered but emits a warning.
+
+    The source 10.223.32.227 is contained in BROAD_GRP (→ 10.223.0.0/16) but
+    has no explicit /32 object.  The planner must flag this so the engineer can
+    verify the host is intentionally in scope rather than silently closing the
+    ticket.
+    """
+    broad_policies = [
+        {"policyid": 77, "name": "fw-mgmt-broad", "status": "enable",
+         "action": 1, "schedule": ["always"],
+         "srcaddr": ["BROAD_GRP"], "dstaddr": ["NET_DST"],
+         "service": ["HTTPS"], "srcintf": ["port1"], "dstintf": ["port2"],
+         "logtraffic": 2},
+    ]
+
+    class BroadFMG(EngineFMG):
+        def __init__(self):
+            super().__init__(policies=broad_policies)
+
+        def get_address_objects(self, adom):
+            return [
+                {"name": "NET_BROAD", "type": "ipmask", "subnet": "10.223.0.0/16"},
+                {"name": "NET_DST", "type": "ipmask", "subnet": "10.9.8.0/24"},
+            ]
+
+        def get_address_groups(self, adom):
+            return [{"name": "BROAD_GRP", "member": ["NET_BROAD"]}]
+
+    plan = plan_change(
+        src="10.223.32.227", dst="10.9.8.7", service="443",
+        firewalls=[TF(device="FW1", adom="root")],
+        justification="broad subnet regression", ticket_id="CHG_BROAD",
+        fmg_client=BroadFMG(),
+        zone_client=EngineZone(),
+    )
+    fw = plan.firewalls[0]
+    assert fw.status == "already_covered", (
+        "Broad subnet still counts as coverage — status must be already_covered"
+    )
+    assert any("broad" in w.lower() for w in fw.warnings), (
+        "Expected a broad-subnet warning but none found; warnings: " + str(fw.warnings)
+    )
+
+
 def test_payload_passes_render_validate():
     for kwargs in ({}, {"service": "tcp/8443"}, {"verdict": "BLOCKED"},
                    {"verdict": "UNKNOWN"}):

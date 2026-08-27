@@ -423,6 +423,8 @@ class MatchResult:
     matched=True with full_cover=False means partial overlap — the policy
     would catch some of the requested traffic but does not prove coverage.
     Unknown refs make a dimension conservatively matched but never full.
+    broad_cover=True means a /32 host is covered only by a subnet broader
+    than /24 — the match is valid but may be incidental; callers should warn.
     """
 
     matched: bool
@@ -432,6 +434,7 @@ class MatchResult:
     conditional_schedule: bool
     unknown_refs: list[str]
     notes: list[str]
+    broad_cover: bool = False
 
 
 _ACTION_MAP = {0: "deny", 1: "accept", 2: "ipsec", 3: "ssl-vpn"}
@@ -470,8 +473,8 @@ class PolicyMatcher:
         unknown: list[str] = []
         notes: list[str] = []
 
-        src_m, src_f = self._addr_dim(pol, "srcaddr", src, unknown)
-        dst_m, dst_f = self._addr_dim(pol, "dstaddr", dst, unknown)
+        src_m, src_f, src_broad = self._addr_dim(pol, "srcaddr", src, unknown)
+        dst_m, dst_f, dst_broad = self._addr_dim(pol, "dstaddr", dst, unknown)
         svc_m, svc_f = self._svc_dim(pol, service_ranges, unknown)
 
         matched = src_m and dst_m and svc_m
@@ -496,12 +499,14 @@ class PolicyMatcher:
             conditional_schedule=conditional_schedule,
             unknown_refs=unknown,
             notes=notes,
+            broad_cover=src_broad or dst_broad,
         )
 
     def addr_side(self, pol: dict, key: str, target: str) -> tuple[bool, bool]:
         """Public (matched, full_cover) for one address side of a policy
         (key is "srcaddr" or "dstaddr")."""
-        return self._addr_dim(pol, key, target, [])
+        m, f, _ = self._addr_dim(pol, key, target, [])
+        return m, f
 
     def svc_side(self, pol: dict, requested: list[PortRange]) -> tuple[bool, bool]:
         """Public (matched, full_cover) for the service dimension."""
@@ -538,7 +543,12 @@ class PolicyMatcher:
     # ------------------------------------------------------------------
 
     def _addr_dim(self, pol: dict, key: str, target: str, unknown: list[str]):
-        """Return (matched, full) for one address dimension."""
+        """Return (matched, full, broad) for one address dimension.
+
+        broad=True when full coverage of a /32 host is established via a
+        subnet with prefix length < 24.  The match is valid but may be
+        incidental; callers should warn the engineer.
+        """
         if not target:
             target_net = ipaddress.ip_network("0.0.0.0/0")
         else:
@@ -546,7 +556,7 @@ class PolicyMatcher:
                 target_net = ipaddress.ip_network(target, strict=False)
             except ValueError:
                 unknown.append(f"{key}:{target}")
-                return True, False
+                return True, False, False
 
         refs = _names(pol.get(key, []))
         negate = pol.get(f"{key}-negate", "disable") in ("enable", 1, True)
@@ -572,18 +582,26 @@ class PolicyMatcher:
             # Policy matches traffic NOT in refs. Unknown refs make the
             # complement uncertain in both directions.
             if has_unknown:
-                return True, False
+                return True, False, False
             matched = not contained if target_net.num_addresses > 1 else not overlap
             full = not overlap  # fully covered only if target entirely outside refs
-            return matched, full
+            return matched, full, False
 
         if contained:
-            return True, True
+            broad = (
+                target_net.prefixlen == 32
+                and any(
+                    target_net.subnet_of(n) and n.prefixlen < 24
+                    for n in collapsed
+                    if n.version == target_net.version
+                )
+            )
+            return True, True, broad
         if overlap:
-            return True, False
+            return True, False, False
         if has_unknown:
-            return True, False  # cannot prove non-match
-        return False, False
+            return True, False, False  # cannot prove non-match
+        return False, False, False
 
     def _svc_dim(self, pol: dict, requested: list[PortRange], unknown: list[str]):
         refs = _names(pol.get("service", []))
