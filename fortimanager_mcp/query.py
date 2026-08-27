@@ -290,6 +290,7 @@ def build_catalogs(
         fetches = {
             "addr":    lambda: client.get_address_objects(adom),
             "addr_grp": lambda: client.get_address_groups(adom),
+            "vip":     lambda: client.get_central_dnat_rules(adom, ""),
             "svc":     lambda: client.get_service_objects(adom),
             "svc_grp": lambda: client.get_service_groups(adom),
         }
@@ -306,6 +307,7 @@ def build_catalogs(
             results["addr_grp"],
             global_objs,
             global_grps,
+            results["vip"],
         )
         svc_catalog = ServiceCatalog(
             results["svc"],
