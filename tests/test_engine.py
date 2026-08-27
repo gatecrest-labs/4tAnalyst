@@ -445,7 +445,7 @@ class EngineFMG:
 
     def get_address_objects(self, adom):
         return [
-            {"name": "NET_10_1", "type": "ipmask", "subnet": "10.1.0.0/16"},
+            {"name": "NET_10_1", "type": "ipmask", "subnet": "10.1.2.0/24"},
             {"name": "NET_DST", "type": "ipmask", "subnet": "10.9.8.0/24"},
             {"name": "H_EXIST", "type": "ipmask", "subnet": "10.1.2.3/32"},
         ]
@@ -625,12 +625,11 @@ def test_device_not_found_flagged():
 
 
 def test_broad_subnet_already_covered_warns():
-    """Coverage via /16 supernet keeps status=already_covered but emits a warning.
+    """Coverage via /16 supernet alone must produce new_rule, not already_covered.
 
     The source 10.223.32.227 is contained in BROAD_GRP (→ 10.223.0.0/16) but
-    has no explicit /32 object.  The planner must flag this so the engineer can
-    verify the host is intentionally in scope rather than silently closing the
-    ticket.
+    has no explicit /32 object.  Broad-subnet coverage must not close the ticket
+    — the engineer must add the host explicitly or create a new rule.
     """
     broad_policies = [
         {"policyid": 77, "name": "fw-mgmt-broad", "status": "enable",
@@ -661,11 +660,60 @@ def test_broad_subnet_already_covered_warns():
         zone_client=EngineZone(),
     )
     fw = plan.firewalls[0]
-    assert fw.status == "already_covered", (
-        "Broad subnet still counts as coverage — status must be already_covered"
+    assert fw.status == "new_rule", (
+        "Broad-subnet coverage must not close the ticket — new explicit rule required"
     )
     assert any("broad" in w.lower() for w in fw.warnings), (
         "Expected a broad-subnet warning but none found; warnings: " + str(fw.warnings)
+    )
+
+
+def test_broad_only_coverage_requires_new_rule():
+    """Real-world regression: ftnt-firewalls (/16) in rule; ftnt-firewalls_0 (/19) not in rule.
+
+    Source 10.223.32.227 falls in both subnets, but only via the broad /16
+    through the rule's actual srcaddr group.  Ticket must NOT be closed as
+    already_covered — a new explicit rule is required.
+    """
+    broad_policies = [
+        {
+            "policyid": 10104, "name": "FortiGate Firewalls to FortiManager",
+            "status": "enable", "action": 1, "schedule": ["always"],
+            "srcaddr": ["ftnt-firewalls"], "dstaddr": ["all"], "service": ["ALL"],
+            "srcintf": ["any"], "dstintf": ["any"],
+        },
+    ]
+
+    class BroadRealFMG(EngineFMG):
+        def __init__(self):
+            super().__init__(policies=broad_policies)
+
+        def get_address_objects(self, adom):
+            return [
+                {"name": "NET_BROAD",    "type": "ipmask", "subnet": "10.223.0.0/16"},
+                {"name": "NET_SPECIFIC", "type": "ipmask", "subnet": "10.223.32.0/19"},
+            ]
+
+        def get_address_groups(self, adom):
+            return [
+                {"name": "ftnt-firewalls",   "member": ["NET_BROAD"]},
+                {"name": "ftnt-firewalls_0", "member": ["NET_SPECIFIC"]},
+            ]
+
+    plan = plan_change(
+        src="10.223.32.227", dst="10.9.8.7", service="443",
+        firewalls=[TF(device="FW1", adom="root")],
+        justification="ftnt-firewalls broad regression", ticket_id="CHG_BROAD2",
+        fmg_client=BroadRealFMG(),
+        zone_client=EngineZone(),
+    )
+    fw = plan.firewalls[0]
+    assert fw.status == "new_rule", (
+        "Coverage only via a /16 supernet (ftnt-firewalls) must not close the "
+        "ticket — expected new_rule"
+    )
+    assert any("broad" in w.lower() for w in fw.warnings), (
+        "Expected a broad-subnet warning; warnings: " + str(fw.warnings)
     )
 
 
@@ -1040,7 +1088,7 @@ def test_any_unknown_pair_means_unknown_no_action():
 
 
 def test_already_covered_requires_every_pair():
-    # default EngineFMG policy 10 covers NET_10_1 -> NET_DST (10.9.8.0/24) on 443
+    # default EngineFMG policy 10 covers NET_10_1 (10.1.2.0/24) -> NET_DST (10.9.8.0/24) on 443
     # 10.99.0.9 is outside NET_DST, so only one of the two pairs is covered
     plan = _run_multi("10.1.2.3", ["10.9.8.7", "10.99.0.9"], "443")
     assert plan.cli_status == "new_rule"
