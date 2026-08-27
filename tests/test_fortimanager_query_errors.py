@@ -173,6 +173,9 @@ class _FailingPolicySearchClient:
     def get_global_address_groups(self):
         return []
 
+    def get_central_dnat_rules(self, adom, pkg):
+        return []
+
     def get_service_objects(self, adom):
         return []
 

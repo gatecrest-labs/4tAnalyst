@@ -267,9 +267,11 @@ class AddressCatalog:
         groups: list[dict],
         global_objects: list[dict] = (),
         global_groups: list[dict] = (),
+        vip_objects: list[dict] = (),
     ) -> None:
         self._objects: dict[str, dict] = {}
         self._groups: dict[str, dict] = {}
+        self._vips: dict[str, dict] = {}
         for o in global_objects or ():
             if isinstance(o, dict) and "name" in o:
                 self._objects[o["name"]] = o
@@ -282,6 +284,14 @@ class AddressCatalog:
         for g in groups:
             if isinstance(g, dict) and "name" in g:
                 self._groups[g["name"]] = g
+        # VIPs (firewall/vip, i.e. Central DNAT objects) are a distinct FMG
+        # object class from firewall/address, but FortiGate allows them to be
+        # selected as a policy dstaddr exactly like a normal address object —
+        # so they must resolve here too, keyed separately since their shape
+        # (extip/mappedip) has nothing in common with _networks_for_object.
+        for v in vip_objects or ():
+            if isinstance(v, dict) and "name" in v:
+                self._vips[v["name"]] = v
 
     def networks_for_ref(self, name: str):
         return self._resolve(name, seen=set())
@@ -328,6 +338,10 @@ class AddressCatalog:
         if obj is not None:
             return self._networks_for_object(obj)
 
+        vip = self._vips.get(name)
+        if vip is not None:
+            return self._networks_for_vip(vip)
+
         group = self._groups.get(name)
         if group is not None:
             nets = []
@@ -367,6 +381,38 @@ class AddressCatalog:
                 return None
 
         # fqdn, geography, dynamic, mac — not resolvable to static networks
+        return None
+
+    @staticmethod
+    def _networks_for_vip(vip: dict):
+        """Resolve a firewall/vip object's external IP(s) to ip_network(s).
+
+        FMG may return extip as a single IP, an "start-end" range, or a list
+        of either (observed across FMG versions). mappedip is intentionally
+        not consulted — dstaddr on a policy line refers to the VIP's public
+        (external) side, which is what other policies must match against.
+        """
+        ext_ip_raw = vip.get("extip", "")
+        if isinstance(ext_ip_raw, list):
+            ext_ip_raw = ext_ip_raw[0] if ext_ip_raw else ""
+        ext_ip = str(ext_ip_raw).strip()
+        if not ext_ip:
+            return None
+
+        try:
+            return [ipaddress.ip_network(ext_ip, strict=False)]
+        except ValueError:
+            pass
+
+        if "-" in ext_ip:
+            try:
+                start_s, _, end_s = ext_ip.partition("-")
+                start = ipaddress.ip_address(start_s.strip())
+                end = ipaddress.ip_address(end_s.strip())
+                return list(ipaddress.summarize_address_range(start, end))
+            except ValueError:
+                return None
+
         return None
 
 

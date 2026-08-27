@@ -289,6 +289,56 @@ def test_addr_unknown_name_returns_none():
     assert AddressCatalog([], []).networks_for_ref("NOPE") is None
 
 
+def test_addr_vip_single_extip():
+    cat = AddressCatalog([], [], vip_objects=[
+        {"name": "Test-VIP", "extip": "203.0.113.10", "mappedip": "10.0.0.5"},
+    ])
+    assert cat.networks_for_ref("Test-VIP") == _nets("203.0.113.10/32")
+
+
+def test_addr_vip_extip_as_list():
+    # FMG returns extip as a list in some responses
+    cat = AddressCatalog([], [], vip_objects=[
+        {"name": "VIP_LIST", "extip": ["203.0.113.20"], "mappedip": "10.0.0.6"},
+    ])
+    assert cat.networks_for_ref("VIP_LIST") == _nets("203.0.113.20/32")
+
+
+def test_addr_vip_extip_range():
+    cat = AddressCatalog([], [], vip_objects=[
+        {"name": "VIP_RANGE", "extip": "203.0.113.30-203.0.113.31"},
+    ])
+    nets = cat.networks_for_ref("VIP_RANGE")
+    covered = set()
+    for n in nets:
+        covered.update([n.network_address, n.broadcast_address])
+    assert ipaddress.ip_address("203.0.113.30") in covered
+    assert ipaddress.ip_address("203.0.113.31") in covered
+
+
+def test_addr_vip_member_of_group_resolves():
+    cat = AddressCatalog(
+        [{"name": "H1", "type": "ipmask", "subnet": "10.1.1.1/32"}],
+        [{"name": "G_MIXED", "member": ["H1", "Test-VIP"]}],
+        vip_objects=[
+            {"name": "Test-VIP", "extip": "203.0.113.10", "mappedip": "10.0.0.5"},
+        ],
+    )
+    nets = cat.networks_for_ref("G_MIXED")
+    assert set(nets) == set(_nets("10.1.1.1/32", "203.0.113.10/32"))
+
+
+def test_addr_vip_name_shadowed_by_address_object_of_same_name():
+    # Regular address objects take precedence over VIPs of the same name,
+    # matching the objects-before-groups precedence already in _resolve.
+    cat = AddressCatalog(
+        [{"name": "DUP", "type": "ipmask", "subnet": "10.1.0.0/24"}],
+        [],
+        vip_objects=[{"name": "DUP", "extip": "203.0.113.40"}],
+    )
+    assert cat.networks_for_ref("DUP") == _nets("10.1.0.0/24")
+
+
 def test_global_group_lookup_and_adom_precedence():
     cat = AddressCatalog(
         objects=[{"name": "DUP", "type": "ipmask", "subnet": "10.1.0.0/24"}],
