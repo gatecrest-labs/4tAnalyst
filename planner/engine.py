@@ -287,24 +287,25 @@ def _plan_firewall(
                 and not any(r.unknown_refs for r in results.values())
                 and _intf_scoped(pol, fw.srcintf, fw.dstintf)
             )
-            full_pairs = [p for p, r in results.items() if r.full_cover]
-            summary["full_cover"] = conditions_ok and len(full_pairs) == len(pairs)
+            full_pairs  = [p for p, r in results.items() if r.full_cover]
+            broad_pairs = [p for p in full_pairs if results[p].broad_cover]
+            firm_pairs  = [p for p in full_pairs if not results[p].broad_cover]
+            summary["full_cover"] = conditions_ok and len(firm_pairs) == len(pairs)
             if conditions_ok and full_pairs:
-                for p in full_pairs:
+                for p in firm_pairs:
                     pair_covered[p].append(pol.get("policyid", 0))
-                if len(full_pairs) < len(pairs):
-                    summary["covered_pairs"] = [f"{s} -> {d}" for s, d in full_pairs]
+                if len(firm_pairs) < len(pairs):
+                    summary["covered_pairs"] = [f"{s} -> {d}" for s, d in firm_pairs]
                 fw.covering_rules.append(summary)
                 policy_id = pol.get("policyid", 0)
-                for p in full_pairs:
-                    if results[p].broad_cover:
-                        msg = (
-                            f"Rule {policy_id} covers {p[0]} via a subnet broader "
-                            f"than /24 — verify that {p[0]} is intentionally within "
-                            "this group's scope before treating as already covered."
-                        )
-                        if msg not in fw.warnings:
-                            fw.warnings.append(msg)
+                for p in broad_pairs:
+                    msg = (
+                        f"Rule {policy_id} covers {p[0]} via a subnet broader than /24 "
+                        f"— verify that {p[0]} is intentionally in scope, then add it "
+                        "explicitly to the group or create a new rule."
+                    )
+                    if msg not in fw.warnings:
+                        fw.warnings.append(msg)
             else:
                 # Skip disabled rules — they have no effect on traffic.
                 if any_r.disabled:
