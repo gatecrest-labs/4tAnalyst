@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Feedback MCP server — engineer decision capture, similarity lookup, and audit logging"
 requires-python = ">=3.11"
 dependencies = [
-    "mcp[cli]>=1.0.0,<2.0.0",
+    "mcp[cli]>=2.1.1,<3.0.0",
     "pyyaml>=6.0",
 ]
 
