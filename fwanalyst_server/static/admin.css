@@ -1,7 +1,8 @@
 *,*::before,*::after{box-sizing:border-box}
 body{font-family:system-ui,sans-serif;margin:0;background:#f5f5f5;color:#222}
 .navbar{display:flex;align-items:center;gap:1rem;padding:.75rem 1.5rem;background:#1a3a5c;color:#fff}
-.navbar-brand{font-weight:700;font-size:1.1rem}
+.navbar-brand{display:flex;align-items:center;font-weight:700;font-size:1.1rem;white-space:nowrap}
+.brand-mark{width:28px;height:28px;flex-shrink:0;margin-right:.4rem}
 .nav-links{display:flex;gap:1rem;flex:1}
 .nav-links a{color:rgba(255,255,255,.8);text-decoration:none;padding:.25rem .5rem;border-radius:4px}
 .nav-links a.active,.nav-links a:hover{color:#fff;background:rgba(255,255,255,.15)}
