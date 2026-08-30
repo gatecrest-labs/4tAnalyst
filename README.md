@@ -1,4 +1,7 @@
-<img alt="4tAnalyst logo" src="docs/assets/logo.svg" width="240">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.svg">
+  <img alt="4tAnalyst logo" src="docs/assets/logo.svg" width="240">
+</picture>
 
 # 4tAnalyst
 
