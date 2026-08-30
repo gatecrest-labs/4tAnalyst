@@ -1,9 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96">
-  <circle cx="30" cy="70" r="36" stroke="#141a24" stroke-width="3" opacity=".15" fill="none"/>
-  <circle cx="30" cy="70" r="25" stroke="#141a24" stroke-width="3" opacity=".28" fill="none"/>
-  <circle cx="30" cy="70" r="14" stroke="#141a24" stroke-width="3" opacity=".45" fill="none"/>
-  <circle cx="30" cy="70" r="9" fill="#141a24"/>
-  <line x1="37" y1="63" x2="64" y2="36" stroke="#141a24" stroke-width="2.2" stroke-dasharray="1 5" stroke-linecap="round"/>
-  <circle cx="70" cy="26" r="8" stroke="#e08a2c" stroke-width="3.4" fill="none"/>
-  <line x1="76" y1="32" x2="81" y2="37" stroke="#e08a2c" stroke-width="3.4" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 140" role="img" aria-label="4tAnalyst logo">
+  <g transform="translate(28, 22)">
+    <circle cx="30" cy="70" r="36" stroke="#141a24" stroke-width="3" opacity=".15" fill="none"/>
+    <circle cx="30" cy="70" r="25" stroke="#141a24" stroke-width="3" opacity=".28" fill="none"/>
+    <circle cx="30" cy="70" r="14" stroke="#141a24" stroke-width="3" opacity=".45" fill="none"/>
+    <circle cx="30" cy="70" r="9" fill="#141a24"/>
+    <line x1="37" y1="63" x2="64" y2="36" stroke="#141a24" stroke-width="2.2" stroke-dasharray="1 5" stroke-linecap="round"/>
+    <circle cx="70" cy="26" r="8" stroke="#e08a2c" stroke-width="3.4" fill="none"/>
+    <line x1="76" y1="32" x2="81" y2="37" stroke="#e08a2c" stroke-width="3.4" stroke-linecap="round"/>
+  </g>
+  <text x="150" y="82" font-family="'Space Grotesk','Segoe UI',Helvetica,Arial,sans-serif" font-size="44" font-weight="700">
+    <tspan fill="#141a24">4t</tspan><tspan fill="#e08a2c">Analyst</tspan>
+  </text>
+  <text x="150" y="108" font-family="'IBM Plex Mono','Courier New',monospace" font-size="13" letter-spacing="1" fill="#5b6472">RULE REVIEW &#183; AI ASSIST</text>
 </svg>
