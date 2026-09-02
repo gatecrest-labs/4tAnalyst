@@ -50,4 +50,10 @@ def version_in_range(version: str, rng: AffectedRange) -> bool:
         return False
     if rng.max_version and v > parse_version(rng.max_version):
         return False
+    # Fortinet lists each affected branch separately, so a range with no
+    # max_version means "all versions of the min's branch" — not unbounded.
+    if not rng.max_version and rng.min_version:
+        min_v = parse_version(rng.min_version)
+        if v[:2] != min_v[:2]:
+            return False
     return True
