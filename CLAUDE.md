@@ -11,7 +11,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Install all packages (run from repo root)
 uv pip install -e mcp_common/ -e standards_mcp/ -e fortimanager_mcp/ -e feedback_mcp/ \
-    -e intake_mcp/ -e zone_mcp/ -e planner/ -e psirt/ -e psirt_mcp/ -e fwanalyst_server/
+    -e intake_mcp/ -e zone_mcp/ -e planner/ -e psirt/ -e psirt_mcp/ -e hygiene/ -e hygiene_mcp/ \
+    -e fwanalyst_server/
 
 # Run the deterministic planner directly (no LLM, no server needed)
 uv run python -m planner --src 10.1.2.3 --dst 10.9.8.7 --service tcp/8443 \
@@ -68,6 +69,7 @@ python -m fwanalyst_server.admin create-user <username> --role admin|viewer
 | `intake_mcp` | **Complete** | .xlsx parser + manual entry normaliser |
 | `zone_mcp` | **Complete** | Live 4THealth zone policy API (IP→zone + verdict) |
 | `psirt` / `psirt_mcp` | **New** | Deterministic PSIRT advisory assessment — matches Fortinet advisory version ranges + workarounds against the live fleet (FortiGate + FortiManager), exploit-aware priority scoring, HTML report. No auto-remediation. |
+| `hygiene` / `hygiene_mcp` | **New** | Deterministic Rule Hygiene fix assessment — parses a completed hygiene run's JSON/CSV findings, cross-references the live policy package, and generates per-finding FortiGate CLI remediation. No auto-remediation. HTML report. |
 | `mcp_common` | **Complete** | Shared input validation, sanitized errors, and log masking used by fortimanager_mcp |
 | `netbrain_mcp` | **Planned** | Automated path discovery — blocked on NetBrain API access |
 
@@ -162,6 +164,18 @@ FortiManager version flag in `credentials.yaml` controls `version: "7.4"` vs `"7
 
 No auto-remediation: output is HTML analysis only, unlike the firewall-change planner. See `docs/superpowers/specs/2026-08-23-psirt-advisory-assessment-design.md` for the full design.
 
+### hygiene/ (deterministic core) + hygiene_mcp/ (MCP wrapper)
+
+- **`hygiene/models.py`** — `Finding`, `FixOption`, `PolicyFix`, `HygieneResult`, `HygieneParseError` (pasted/uploaded findings text couldn't be parsed), `HygieneDataError` (a data source failed outright, never "no results").
+- **`hygiene/tag.py`** — the `[HygieneFix YYYY-MM-DD]` / `[HygieneFix EXEMPT YYYY-MM-DD]` traceability tag appended to a rule's comment by any fix that disables or annotates it; `find_tag()` recovers the tag date for the `disabled` check's 90-day-age branch.
+- **`hygiene/parse.py`** — parses a Rule Hygiene run's findings from pasted/uploaded JSON or CSV, including the scheduled-job CSV export's `#`-comment metadata rows and trailing unused-object sections.
+- **`hygiene/fix_logic.py`** — one `_fix_<check>()` deterministic fix generator per Rule Hygiene check (9 total), dispatched via `_FIX_FNS`, each producing `list[FixOption]` against the raw FortiManager policy dict.
+- **`hygiene/engine.py`** — `assess(findings, live_policies_by_pkg, device, adom, pkg, now=None) -> HygieneResult`, the single entry point.
+- **`hygiene/report.py`** — stdlib-only HTML report renderer, matching `scripts/render_report.py`'s zero-dependency convention.
+- **`hygiene_mcp/server.py`** — FastMCP wrapper exposing `parse_hygiene_findings`, `assess_hygiene_fixes`, `render_hygiene_report`. Registered into `fwanalyst_server`.
+
+No auto-remediation: output is per-finding FortiGate CLI plus an HTML report, never applied to FortiManager or a device.
+
 ### feedback_mcp/
 
 **`store.py`** — SQLite backend (WAL mode). Schema: `feedback` table (indexed on src_zone/dst_zone/service for similarity queries) + append-only `audit_log`. Phase 4 migration path: replace `_connect()` for Postgres; all other code is DB-API 2.0 agnostic.
@@ -235,6 +249,7 @@ Unit tests live in `tests/`. Run with `pytest -q tests/`. Test files:
 - `tests/test_fwanalyst_auth.py` — bearer middleware, ADOM token resolution, ContextVar injection, tool-aggregation count
 - `tests/test_fortimanager_adom_guard.py` — `_require_adom()` logic and `get_adoms()` filtering
 - `tests/test_rate_limit.py` — per-session call-budget middleware (window expiry, per-session isolation, 429 + Retry-After)
+- `tests/test_hygiene_parse.py`, `tests/test_hygiene_fix_logic.py`, `tests/test_hygiene_engine.py`, `tests/test_hygiene_report.py`, `tests/test_hygiene_mcp.py` — Rule Hygiene fix assessment (parsing, all 9 check generators, engine, HTML rendering, ADOM guard)
 - `tests/test_policy_engine.py`, `tests/test_fortimanager_client.py`, `tests/test_zone_client.py`, `tests/test_zone_map.py`, `tests/test_render_report.py` — pre-existing suites
 
 CI (`smoke-tests.yml`) runs `unit-tests` (full `pytest -q tests/` with all packages installed) and `smoke-tests` (containerised auth-aware checks via `scripts/run_smoke.py` against the unified server).
@@ -300,6 +315,7 @@ See `todo.md` for the full list. Top blockers:
 - `/record-decision` — write audit entry to feedback_mcp
 - `/missing-info` — triage incomplete requests and draft follow-up
 - `/analyze-psirt` — assess a Fortinet PSIRT advisory email against the fleet: per-device no-action/config-change/upgrade verdict, exploit-aware priority, HTML report under `output/`
+- `/analyze-hygiene` — turn a completed Rule Hygiene run's findings into deterministic FortiGate CLI remediation per finding, with an HTML report under `output/hygiene/`
 
 ## Phase roadmap (revised)
 
