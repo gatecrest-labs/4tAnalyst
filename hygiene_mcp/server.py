@@ -26,7 +26,7 @@ from fortimanager_mcp import query as _query
 from fortimanager_mcp.client import FortiManagerClient
 from fwanalyst_server.context import allowed_adoms_var
 from hygiene.engine import assess as _assess
-from hygiene.models import Finding, HygieneDataError, HygieneParseError
+from hygiene.models import Finding, HygieneDataError, HygieneParseError, PolicyFix, FixOption, HygieneResult
 from hygiene.parse import parse_csv, parse_json
 from hygiene.report import render_html
 from mcp_common.errors import safe_error
@@ -203,6 +203,33 @@ def assess_hygiene_fixes(
         payload["html_content"] = None
         payload["html_error"] = str(e)
     return payload
+
+
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+def render_hygiene_report(assessment: dict[str, Any]) -> dict[str, Any]:
+    """
+    Re-render the HTML report from a previously computed assessment dict
+    (the structure assess_hygiene_fixes returns, minus html_content/
+    html_error). Retry path for when the inline render in
+    assess_hygiene_fixes failed.
+    """
+    try:
+        fixes = [
+            PolicyFix(
+                policy_id=f["policy_id"], policy_name=f["policy_name"], check=f["check"],
+                options=[FixOption(**o) for o in f.get("options", [])],
+            )
+            for f in assessment["fixes"]
+        ]
+        result = HygieneResult(
+            device=assessment["device"], adom=assessment["adom"], pkg=assessment["pkg"],
+            generated_at=assessment["generated_at"], fixes=fixes,
+            stale_findings=assessment.get("stale_findings", []),
+        )
+        return {"html_content": render_html(result)}
+    except Exception as e:
+        message, code = safe_error(e)
+        return {"error": message, "error_code": code}
 
 
 if __name__ == "__main__":

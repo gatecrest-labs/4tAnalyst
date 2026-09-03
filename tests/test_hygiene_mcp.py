@@ -114,3 +114,27 @@ def test_assess_hygiene_fixes_fetch_failure_surfaces_error(monkeypatch):
     finally:
         allowed_adoms_var.reset(token)
     assert result["error_code"] == "upstream_error"
+
+
+def test_render_hygiene_report_rebuilds_html_from_assessment_dict():
+    assessment = {
+        "device": "FW1", "adom": "OT-ADOM", "pkg": "pkg1",
+        "generated_at": "2026-09-03T12:00:00+00:00",
+        "fixes": [{
+            "policy_id": "1", "policy_name": "P1", "check": "unhit",
+            "options": [{
+                "option_id": "A", "label": "Disable", "description": "disable it",
+                "cli": ["config firewall policy\n    edit 1\nend"],
+                "new_comment": None, "irreversible": False,
+            }],
+        }],
+        "stale_findings": [],
+    }
+    result = hygiene_server.render_hygiene_report(assessment)
+    assert "error" not in result
+    assert "P1" in result["html_content"]
+
+
+def test_render_hygiene_report_malformed_input_returns_error():
+    result = hygiene_server.render_hygiene_report({"device": "FW1"})  # missing required keys
+    assert "error" in result
