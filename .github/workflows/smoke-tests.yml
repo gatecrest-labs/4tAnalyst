@@ -61,7 +61,7 @@ jobs:
           python -m pip install --upgrade pip "setuptools>=83"  # PYSEC-2026-3447 in the runner's default setuptools
           pip install pytest openpyxl
           pip install -c constraints.txt -e mcp_common/ -e standards_mcp/ -e fortimanager_mcp/ -e feedback_mcp/ \
-            -e intake_mcp/ -e zone_mcp/ -e fwanalyst_server/
+            -e intake_mcp/ -e zone_mcp/ -e planner/ -e psirt/ -e psirt_mcp/ -e hygiene/ -e hygiene_mcp/ -e fwanalyst_server/
 
       - name: Run unit tests
         env:

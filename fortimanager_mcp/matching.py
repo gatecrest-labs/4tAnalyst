@@ -591,7 +591,7 @@ class PolicyMatcher:
             broad = (
                 target_net.prefixlen == 32
                 and any(
-                    target_net.subnet_of(n) and n.prefixlen < 24
+                    target_net.subnet_of(n) and 0 < n.prefixlen < 24
                     for n in collapsed
                     if n.version == target_net.version
                 )

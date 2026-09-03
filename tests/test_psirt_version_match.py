@@ -58,10 +58,14 @@ def test_version_in_range_open_ended_below():
 
 
 def test_version_in_range_open_ended_above():
+    # "all versions of 7.4 branch" -> min_version="7.4.0", max_version=""
+    # must not match versions on a different major.minor branch
     rng = AffectedRange(product="FortiOS", min_version="7.4.0", max_version="")
     assert version_in_range("7.4.0", rng) is True
-    assert version_in_range("9.9.9", rng) is True
+    assert version_in_range("7.4.11", rng) is True
     assert version_in_range("7.3.9", rng) is False
+    assert version_in_range("7.5.0", rng) is False
+    assert version_in_range("9.9.9", rng) is False
 
 
 def test_version_in_range_unparseable_current_version_raises():

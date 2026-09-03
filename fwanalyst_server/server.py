@@ -219,6 +219,7 @@ _ANNOTATIONS = {
 def _register_existing_tools() -> None:
     from feedback_mcp import server as feedback
     from fortimanager_mcp import server as fmg
+    from hygiene_mcp import server as hygiene
     from intake_mcp import server as intake
     from psirt_mcp import server as psirt
     from standards_mcp import server as standards
@@ -273,6 +274,10 @@ def _register_existing_tools() -> None:
         psirt.parse_advisory,
         psirt.assess_fleet_exposure,
         psirt.render_psirt_report,
+        # rule hygiene fix assessment
+        hygiene.parse_hygiene_findings,
+        hygiene.assess_hygiene_fixes,
+        hygiene.render_hygiene_report,
     ):
         mcp.add_tool(_logged(fn), annotations=_ANNOTATIONS.get(
             fn.__name__, ToolAnnotations(readOnlyHint=True)))
