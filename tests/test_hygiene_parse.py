@@ -47,3 +47,8 @@ def test_parse_json_object_without_findings_key_raises():
 def test_parse_json_missing_required_field_raises():
     with pytest.raises(HygieneParseError):
         parse_json('[{"policy_id": "1", "check": "unhit"}]')
+
+
+def test_parse_json_invalid_seq_raises():
+    with pytest.raises(HygieneParseError):
+        parse_json('[{"policy_id": "1", "policy_name": "P1", "seq": "not-a-number", "check": "unhit"}]')

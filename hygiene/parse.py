@@ -50,10 +50,16 @@ def _finding_from_dict(item: dict) -> Finding:
     for key in _REQUIRED_FIELDS:
         if not item.get(key):
             raise HygieneParseError(f"finding missing required field: {key}")
+
+    try:
+        seq = int(item.get("seq", 0) or 0)
+    except (ValueError, TypeError):
+        raise HygieneParseError(f"finding has invalid seq: {item.get('seq')!r}") from None
+
     return Finding(
         policy_id=str(item["policy_id"]),
         policy_name=str(item["policy_name"]),
-        seq=int(item.get("seq", 0) or 0),
+        seq=seq,
         check=str(item["check"]),
         detail=str(item.get("detail", "")),
         severity=str(item.get("severity", "")),
