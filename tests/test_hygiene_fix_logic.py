@@ -1,0 +1,60 @@
+import sys
+from datetime import date
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from hygiene.fix_logic import (
+    FixContext, _fix_unhit, _fix_expired, _fix_unlogged,
+    _fix_missing_security_profile, _fix_redundant,
+)
+from hygiene.models import Finding
+
+CTX = FixContext(now=date(2026, 9, 3))
+
+
+def _finding(check, **kw):
+    base = dict(policy_id="1", policy_name="P1", seq=1, check=check, detail="d")
+    base.update(kw)
+    return Finding(**base)
+
+
+def test_fix_unhit_disables_and_tags():
+    live = {"comments": "Allow web"}
+    opts = _fix_unhit(_finding("unhit"), live, CTX)
+    assert len(opts) == 1
+    assert "set status disable" in opts[0].cli[0]
+    assert "[HygieneFix 2026-09-03]" in opts[0].new_comment
+
+
+def test_fix_expired_disables_and_tags():
+    live = {"comments": ""}
+    opts = _fix_expired(_finding("expired"), live, CTX)
+    assert len(opts) == 1
+    assert "set status disable" in opts[0].cli[0]
+
+
+def test_fix_unlogged_sets_logtraffic_all_no_comment_change():
+    live = {"comments": "Allow web"}
+    opts = _fix_unlogged(_finding("unlogged"), live, CTX)
+    assert len(opts) == 1
+    assert "set logtraffic all" in opts[0].cli[0]
+    assert opts[0].new_comment is None
+
+
+def test_fix_missing_security_profile_is_informational_only():
+    live = {"comments": ""}
+    opts = _fix_missing_security_profile(_finding("missing_security_profile", detail="accept rule, no UTM"), live, CTX)
+    assert len(opts) == 1
+    assert opts[0].cli == []
+    assert "accept rule, no UTM" in opts[0].description
+
+
+def test_fix_redundant_cites_duplicate_of():
+    live = {"comments": ""}
+    finding = _finding("redundant", duplicate_of={"name": "Older-Rule", "policy_id": "3"})
+    opts = _fix_redundant(finding, live, CTX)
+    assert len(opts) == 1
+    assert "Older-Rule" in opts[0].description
+    assert "3" in opts[0].description
+    assert "set status disable" in opts[0].cli[0]
