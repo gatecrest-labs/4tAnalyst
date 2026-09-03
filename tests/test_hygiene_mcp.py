@@ -39,3 +39,78 @@ def test_parse_hygiene_findings_csv():
     text = "Policy ID,Policy Name,Seq,Check,Detail\r\n1,P1,1,unhit,no hits\r\n"
     result = parse_hygiene_findings(text=text, file_type="csv")
     assert result["findings"][0]["check"] == "unhit"
+
+
+from fwanalyst_server.context import allowed_adoms_var
+from hygiene_mcp import server as hygiene_server
+
+_LIVE = [
+    {"policyid": 1, "name": "P1", "comments": "", "srcaddr": ["S1"], "dstaddr": ["D1"], "action": "accept"},
+]
+
+
+class _FakeClient:
+    def __enter__(self): return self
+    def __exit__(self, *a): pass
+
+
+def _one_finding():
+    return [{"policy_id": "1", "policy_name": "P1", "seq": 1, "check": "unhit", "detail": "no hits"}]
+
+
+def test_assess_hygiene_fixes_blocked_by_adom_guard():
+    token = allowed_adoms_var.set({"OTHER-ADOM"})
+    try:
+        result = hygiene_server.assess_hygiene_fixes(
+            adom="OT-ADOM", device="FW1", pkg="pkg1", findings=_one_finding(),
+        )
+    finally:
+        allowed_adoms_var.reset(token)
+    assert result["error_code"] == "forbidden"
+
+
+def test_assess_hygiene_fixes_happy_path(monkeypatch):
+    from fortimanager_mcp import query as _query
+
+    monkeypatch.setattr(hygiene_server, "_fortimanager_client", lambda: _FakeClient())
+    monkeypatch.setattr(_query, "get_device_policies", lambda c, adom, pkgs: {"pkg1": _LIVE})
+
+    token = allowed_adoms_var.set({"*"})
+    try:
+        result = hygiene_server.assess_hygiene_fixes(
+            adom="OT-ADOM", device="FW1", pkg="pkg1", findings=_one_finding(),
+        )
+    finally:
+        allowed_adoms_var.reset(token)
+
+    assert "error" not in result
+    assert result["fixes"][0]["policy_id"] == "1"
+    assert result["html_content"] is not None
+    assert result["html_error"] is None
+
+
+def test_assess_hygiene_fixes_missing_pkg_returns_error():
+    token = allowed_adoms_var.set({"*"})
+    try:
+        result = hygiene_server.assess_hygiene_fixes(
+            adom="OT-ADOM", device="FW1", pkg="", findings=_one_finding(),
+        )
+    finally:
+        allowed_adoms_var.reset(token)
+    assert result["error_code"] == "invalid_input"
+
+
+def test_assess_hygiene_fixes_fetch_failure_surfaces_error(monkeypatch):
+    from fortimanager_mcp import query as _query
+
+    monkeypatch.setattr(hygiene_server, "_fortimanager_client", lambda: _FakeClient())
+    monkeypatch.setattr(_query, "get_device_policies", lambda c, adom, pkgs: {"pkg1": None})
+
+    token = allowed_adoms_var.set({"*"})
+    try:
+        result = hygiene_server.assess_hygiene_fixes(
+            adom="OT-ADOM", device="FW1", pkg="pkg1", findings=_one_finding(),
+        )
+    finally:
+        allowed_adoms_var.reset(token)
+    assert result["error_code"] == "upstream_error"
