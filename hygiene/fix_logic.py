@@ -171,3 +171,34 @@ def _fix_over_permissive(finding: Finding, live_policy: dict, ctx: FixContext) -
         [exempt_cli], exempt_comment,
     )
     return [disable, exempt]
+
+
+def _fix_disabled(finding: Finding, live_policy: dict, ctx: FixContext) -> list[FixOption]:
+    comment = _comment(live_policy)
+    tag_date = find_tag(comment)
+
+    if tag_date is None:
+        new_comment = append_tag(comment, ctx.now)
+        cli = _wrap_policy_block(finding.policy_id, [f'set comments "{_safe(new_comment)}"'])
+        return [FixOption(
+            "A", "Tag for tracking",
+            "No prior HygieneFix tag found; record today's date so the "
+            "90-day deletion window can be tracked.",
+            [cli], new_comment,
+        )]
+
+    age_days = (ctx.now - tag_date).days
+    if age_days > 90:
+        cli = _wrap_delete(finding.policy_id)
+        return [FixOption(
+            "A", "Delete",
+            f"Disabled and tagged {age_days} days ago (>90); safe to delete.",
+            [cli], None, irreversible=True,
+        )]
+
+    return [FixOption(
+        "A", "No action needed yet",
+        f"Tagged {age_days} days ago; eligible for deletion in "
+        f"{90 - age_days} more day(s).",
+        [], None,
+    )]

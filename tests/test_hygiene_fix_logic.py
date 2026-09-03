@@ -116,3 +116,32 @@ def test_fix_over_permissive_returns_disable_and_exempt_options():
     assert opts[1].option_id == "B"
     assert "EXEMPT" in opts[1].new_comment
     assert "set status disable" not in opts[1].cli[0]
+
+
+from hygiene.fix_logic import _fix_disabled
+
+
+def test_fix_disabled_no_tag_proposes_tagging():
+    live = {"comments": "Was in use"}
+    opts = _fix_disabled(_finding("disabled"), live, CTX)
+    assert len(opts) == 1
+    assert opts[0].label == "Tag for tracking"
+    assert opts[0].cli[0].count("set status disable") == 0  # comment-only, rule already disabled
+    assert "[HygieneFix 2026-09-03]" in opts[0].new_comment
+
+
+def test_fix_disabled_recent_tag_no_action():
+    live = {"comments": "Was in use [HygieneFix 2026-08-01]"}  # 33 days before CTX.now
+    opts = _fix_disabled(_finding("disabled"), live, CTX)
+    assert len(opts) == 1
+    assert opts[0].cli == []
+    assert "33 days" in opts[0].description
+    assert opts[0].irreversible is False
+
+
+def test_fix_disabled_old_tag_proposes_delete():
+    live = {"comments": "Was in use [HygieneFix 2026-01-01]"}  # 245 days before CTX.now
+    opts = _fix_disabled(_finding("disabled"), live, CTX)
+    assert len(opts) == 1
+    assert "delete" in opts[0].cli[0]
+    assert opts[0].irreversible is True
