@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from hygiene.fix_logic import (
     FixContext, _fix_unhit, _fix_expired, _fix_unlogged,
-    _fix_missing_security_profile, _fix_redundant, _fix_unnamed,
+    _fix_missing_security_profile, _fix_redundant, _fix_unnamed, _fix_over_permissive,
 )
 from hygiene.models import Finding
 
@@ -105,3 +105,14 @@ def test_fix_unnamed_truncates_name_to_35_chars():
     line = [l for l in opts[0].cli[0].splitlines() if "set name" in l][0]
     name = line.split('"')[1]
     assert len(name) <= 35
+
+
+def test_fix_over_permissive_returns_disable_and_exempt_options():
+    live = {"comments": "Allow any to any"}
+    opts = _fix_over_permissive(_finding("over_permissive"), live, CTX)
+    assert len(opts) == 2
+    assert opts[0].option_id == "A"
+    assert "set status disable" in opts[0].cli[0]
+    assert opts[1].option_id == "B"
+    assert "EXEMPT" in opts[1].new_comment
+    assert "set status disable" not in opts[1].cli[0]

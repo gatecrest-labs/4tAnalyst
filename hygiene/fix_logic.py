@@ -151,3 +151,23 @@ def _fix_unnamed(finding: Finding, live_policy: dict, ctx: FixContext) -> list[F
         f'Set policy name to "{name}" and record the fix date.',
         [cli], new_comment,
     )]
+
+
+def _fix_over_permissive(finding: Finding, live_policy: dict, ctx: FixContext) -> list[FixOption]:
+    comment = _comment(live_policy)
+    disable = _disable_and_tag_option(
+        finding, live_policy, ctx, "A", "Disable",
+        "Disable the over-permissive rule and record the fix date.",
+    )
+    exempt_comment = append_tag(comment, ctx.now, exempt=True)
+    exempt_cli = _wrap_policy_block(finding.policy_id, [
+        f'set comments "{_safe(exempt_comment)}"',
+    ])
+    exempt = FixOption(
+        "B", "Exempt (keep enabled)",
+        "Mark reviewed-and-accepted; the rule stays enabled and is excluded "
+        "from future hygiene runs (the EXEMPT tag is also what "
+        "app/hygiene.py::_is_exempt matches on).",
+        [exempt_cli], exempt_comment,
+    )
+    return [disable, exempt]
