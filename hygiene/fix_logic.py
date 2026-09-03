@@ -137,9 +137,10 @@ def _fix_unnamed(finding: Finding, live_policy: dict, ctx: FixContext) -> list[F
     src = _addr_list(live_policy.get("srcaddr"))
     dst = _addr_list(live_policy.get("dstaddr"))
     if src and dst and not _is_any(src) and not _is_any(dst):
-        name = f"Allow {src[0]} to {dst[0]}"[:35]
+        raw_name = f"Allow {src[0]} to {dst[0]}"
     else:
-        name = "Unknown -- Requires additional research"
+        raw_name = "Unknown -- Requires additional research"
+    name = raw_name[:35]
     new_comment = append_tag(_comment(live_policy), ctx.now)
     cli = _wrap_policy_block(finding.policy_id, [
         f'set name "{_safe(name)}"',

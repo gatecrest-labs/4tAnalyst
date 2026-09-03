@@ -70,7 +70,32 @@ def test_fix_unnamed_with_resolvable_src_and_dst():
 def test_fix_unnamed_falls_back_when_src_is_any():
     live = {"comments": "", "srcaddr": ["all"], "dstaddr": ["DB-SRV"]}
     opts = _fix_unnamed(_finding("unnamed"), live, CTX)
-    assert "Unknown -- Requires additional research" in opts[0].cli[0]
+    # extract the quoted name value
+    line = [l for l in opts[0].cli[0].splitlines() if "set name" in l][0]
+    name = line.split('"')[1]
+    # fallback is truncated to 35 chars: "Unknown -- Requires additional..."
+    assert len(name) <= 35
+    assert name.startswith("Unknown -- Requires additio")
+
+
+def test_fix_unnamed_falls_back_when_dst_is_any():
+    live = {"comments": "", "srcaddr": ["WEB-SRV"], "dstaddr": ["all"]}
+    opts = _fix_unnamed(_finding("unnamed"), live, CTX)
+    # extract the quoted name value
+    line = [l for l in opts[0].cli[0].splitlines() if "set name" in l][0]
+    name = line.split('"')[1]
+    assert len(name) <= 35
+    assert name.startswith("Unknown -- Requires additio")
+
+
+def test_fix_unnamed_falls_back_when_src_and_dst_missing():
+    live = {"comments": ""}
+    opts = _fix_unnamed(_finding("unnamed"), live, CTX)
+    # extract the quoted name value
+    line = [l for l in opts[0].cli[0].splitlines() if "set name" in l][0]
+    name = line.split('"')[1]
+    assert len(name) <= 35
+    assert name.startswith("Unknown -- Requires additio")
 
 
 def test_fix_unnamed_truncates_name_to_35_chars():
