@@ -202,3 +202,82 @@ def _fix_disabled(finding: Finding, live_policy: dict, ctx: FixContext) -> list[
         f"{90 - age_days} more day(s).",
         [], None,
     )]
+
+
+def _fix_shadow(finding: Finding, live_policy: dict, ctx: FixContext) -> list[FixOption]:
+    shadowing = finding.shadowing_rule or {}
+    options = [_disable_and_tag_option(
+        finding, live_policy, ctx, "A", "Disable shadowed rule",
+        "This rule is fully shadowed by an earlier, broader rule; disable it.",
+    )]
+
+    shadowed_action = str(live_policy.get("action", "")).lower()
+    shadowing_action = str(shadowing.get("action", "")).lower()
+    shadowing_id = shadowing.get("policy_id") or shadowing.get("rule_id") or shadowing.get("id")
+
+    if shadowing_id and shadowed_action and shadowing_action and shadowed_action != shadowing_action:
+        move_cli = _wrap_move(finding.policy_id, shadowing_id)
+        options.append(FixOption(
+            "B", "Reorder above the shadowing rule",
+            f"Actions differ ({shadowed_action} vs {shadowing_action}); "
+            f"move this rule before policy {shadowing_id} instead of disabling it.",
+            [move_cli], None,
+        ))
+
+    if finding.policy_id not in ctx.redundant_policy_ids:
+        narrow = _shadow_narrow_option(finding, live_policy, shadowing)
+        if narrow is not None:
+            options.append(narrow)
+
+    return options
+
+
+def _shadow_narrow_option(finding: Finding, live_policy: dict, shadowing: dict) -> FixOption | None:
+    shadowing_id = shadowing.get("policy_id") or shadowing.get("rule_id") or shadowing.get("id")
+    if not shadowing_id:
+        return None
+
+    my_src = set(_addr_list(live_policy.get("srcaddr")))
+    my_dst = set(_addr_list(live_policy.get("dstaddr")))
+    shadowing_src = set(_addr_list(shadowing.get("srcaddr") or shadowing.get("source")))
+    shadowing_dst = set(_addr_list(shadowing.get("dstaddr") or shadowing.get("destination")))
+
+    if my_src == shadowing_src and my_dst == shadowing_dst:
+        return None  # identical scope is redundant's territory, not shadow's
+
+    # Best-effort only: never auto-generate group-membership CLI (removing a
+    # member from a shared address group affects every other rule that
+    # references it, and this engine doesn't resolve group nesting/blast
+    # radius) — always describe the option with no CLI, per the spec's
+    # explicit "empty cli + manual note" fallback.
+    return FixOption(
+        "C", "Narrow the shadowing rule's scope",
+        f"This rule covers a subset of policy {shadowing_id}'s scope but "
+        "isn't identical to it. Removing this rule's specific source/"
+        "destination from the broader shadowing rule would let both stay "
+        "enabled with distinct scopes, but group/address membership changes "
+        "need manual review — no CLI is auto-generated for this option.",
+        [], None,
+    )
+
+
+_FIX_FNS = {
+    "unnamed": _fix_unnamed,
+    "unlogged": _fix_unlogged,
+    "shadow": _fix_shadow,
+    "disabled": _fix_disabled,
+    "expired": _fix_expired,
+    "unhit": _fix_unhit,
+    "missing_security_profile": _fix_missing_security_profile,
+    "redundant": _fix_redundant,
+    "over_permissive": _fix_over_permissive,
+}
+
+
+def build_fix(finding: Finding, live_policy: dict, ctx: FixContext) -> list[FixOption] | None:
+    """Dispatch to the registered generator for finding.check, or None if the
+    check isn't recognized (defensive — skipped by the caller, not an error)."""
+    fn = _FIX_FNS.get(finding.check)
+    if fn is None:
+        return None
+    return fn(finding, live_policy, ctx)

@@ -145,3 +145,79 @@ def test_fix_disabled_old_tag_proposes_delete():
     assert len(opts) == 1
     assert "delete" in opts[0].cli[0]
     assert opts[0].irreversible is True
+
+
+from hygiene.fix_logic import _fix_shadow, build_fix, _FIX_FNS
+
+
+def test_fix_shadow_option_a_always_present():
+    live = {"comments": "", "srcaddr": ["S1"], "dstaddr": ["D1"], "action": "accept"}
+    finding = _finding("shadow", shadowing_rule={"policy_id": "2", "action": "accept",
+                                                  "srcaddr": ["all"], "dstaddr": ["all"]})
+    opts = _fix_shadow(finding, live, CTX)
+    assert opts[0].option_id == "A"
+    assert "set status disable" in opts[0].cli[0]
+
+
+def test_fix_shadow_option_b_offered_when_actions_differ():
+    live = {"comments": "", "srcaddr": ["S1"], "dstaddr": ["D1"], "action": "deny"}
+    finding = _finding("shadow", shadowing_rule={"policy_id": "2", "action": "accept",
+                                                  "srcaddr": ["all"], "dstaddr": ["all"]})
+    opts = _fix_shadow(finding, live, CTX)
+    b = [o for o in opts if o.option_id == "B"]
+    assert len(b) == 1
+    assert "move 1 before 2" in b[0].cli[0]
+
+
+def test_fix_shadow_option_b_absent_when_actions_match():
+    live = {"comments": "", "srcaddr": ["S1"], "dstaddr": ["D1"], "action": "accept"}
+    finding = _finding("shadow", shadowing_rule={"policy_id": "2", "action": "accept",
+                                                  "srcaddr": ["all"], "dstaddr": ["all"]})
+    opts = _fix_shadow(finding, live, CTX)
+    assert not [o for o in opts if o.option_id == "B"]
+
+
+def test_fix_shadow_option_c_offered_for_covering_not_identical_scope():
+    live = {"comments": "", "srcaddr": ["S1"], "dstaddr": ["D1"], "action": "accept"}
+    finding = _finding("shadow", shadowing_rule={"policy_id": "2", "action": "accept",
+                                                  "srcaddr": ["GRP-ALL-SRC"], "dstaddr": ["D1"]})
+    opts = _fix_shadow(finding, live, CTX)
+    c = [o for o in opts if o.option_id == "C"]
+    assert len(c) == 1
+    assert c[0].cli == []  # best-effort: never auto-generate group-membership CLI
+
+
+def test_fix_shadow_option_c_absent_when_scope_identical():
+    """Identical scope is redundant's territory, not shadow's."""
+    live = {"comments": "", "srcaddr": ["S1"], "dstaddr": ["D1"], "action": "accept"}
+    finding = _finding("shadow", shadowing_rule={"policy_id": "2", "action": "accept",
+                                                  "srcaddr": ["S1"], "dstaddr": ["D1"]})
+    opts = _fix_shadow(finding, live, CTX)
+    assert not [o for o in opts if o.option_id == "C"]
+
+
+def test_fix_shadow_option_c_absent_when_also_redundant():
+    live = {"comments": "", "srcaddr": ["S1"], "dstaddr": ["D1"], "action": "accept"}
+    finding = _finding("shadow", shadowing_rule={"policy_id": "2", "action": "accept",
+                                                  "srcaddr": ["GRP-ALL-SRC"], "dstaddr": ["D1"]})
+    ctx = FixContext(now=date(2026, 9, 3), redundant_policy_ids={"1"})
+    opts = _fix_shadow(finding, live, ctx)
+    assert not [o for o in opts if o.option_id == "C"]
+
+
+def test_build_fix_dispatches_by_check():
+    opts = build_fix(_finding("unhit"), {"comments": ""}, CTX)
+    assert opts is not None
+    assert opts[0].label == "Disable"
+
+
+def test_build_fix_returns_none_for_unknown_check():
+    assert build_fix(_finding("some_future_check"), {"comments": ""}, CTX) is None
+
+
+def test_all_nine_checks_registered():
+    expected = {
+        "unnamed", "unlogged", "shadow", "disabled", "expired",
+        "unhit", "missing_security_profile", "redundant", "over_permissive",
+    }
+    assert set(_FIX_FNS.keys()) == expected
