@@ -66,3 +66,27 @@ def test_assess_result_carries_scope_metadata():
     assert result.device == "FW1"
     assert result.adom == "OT-ADOM"
     assert result.pkg == "pkg1"
+
+
+def test_assess_suppresses_shadow_narrow_option_for_redundant_policy():
+    # Shadowing rule covers a superset of policy 1's src (S1 vs S1+S2), so
+    # _shadow_narrow_option would normally offer Option C -- unless
+    # policy_id "1" is also flagged "redundant" elsewhere in the same
+    # findings list, in which case ctx.redundant_policy_ids (built by
+    # assess() from the whole findings list) must suppress it.
+    shadowing_rule = {
+        "policy_id": "5",
+        "srcaddr": ["S1", "S2"],
+        "dstaddr": ["D1"],
+        "action": "accept",
+    }
+    findings = [
+        _finding("1", "shadow", shadowing_rule=shadowing_rule),
+        _finding("1", "redundant", duplicate_of={"name": "P5", "policy_id": "5"}),
+    ]
+    result = assess(findings, {"pkg1": LIVE}, "FW1", "OT-ADOM", "pkg1", now=date(2026, 9, 3))
+
+    shadow_fixes = [f for f in result.fixes if f.check == "shadow"]
+    assert len(shadow_fixes) == 1
+    option_ids = {o.option_id for o in shadow_fixes[0].options}
+    assert "C" not in option_ids
