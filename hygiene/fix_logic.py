@@ -131,3 +131,22 @@ def _fix_redundant(finding: Finding, live_policy: dict, ctx: FixContext) -> list
         finding, live_policy, ctx, "A", "Disable",
         f"Redundant with rule '{dup_name}' (id {dup_id}); disable this later duplicate.",
     )]
+
+
+def _fix_unnamed(finding: Finding, live_policy: dict, ctx: FixContext) -> list[FixOption]:
+    src = _addr_list(live_policy.get("srcaddr"))
+    dst = _addr_list(live_policy.get("dstaddr"))
+    if src and dst and not _is_any(src) and not _is_any(dst):
+        name = f"Allow {src[0]} to {dst[0]}"[:35]
+    else:
+        name = "Unknown -- Requires additional research"
+    new_comment = append_tag(_comment(live_policy), ctx.now)
+    cli = _wrap_policy_block(finding.policy_id, [
+        f'set name "{_safe(name)}"',
+        f'set comments "{_safe(new_comment)}"',
+    ])
+    return [FixOption(
+        "A", "Rename and tag",
+        f'Set policy name to "{name}" and record the fix date.',
+        [cli], new_comment,
+    )]

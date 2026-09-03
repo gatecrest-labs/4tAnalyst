@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from hygiene.fix_logic import (
     FixContext, _fix_unhit, _fix_expired, _fix_unlogged,
-    _fix_missing_security_profile, _fix_redundant,
+    _fix_missing_security_profile, _fix_redundant, _fix_unnamed,
 )
 from hygiene.models import Finding
 
@@ -58,3 +58,25 @@ def test_fix_redundant_cites_duplicate_of():
     assert "Older-Rule" in opts[0].description
     assert "3" in opts[0].description
     assert "set status disable" in opts[0].cli[0]
+
+
+def test_fix_unnamed_with_resolvable_src_and_dst():
+    live = {"comments": "", "srcaddr": ["WEB-SRV"], "dstaddr": ["DB-SRV"]}
+    opts = _fix_unnamed(_finding("unnamed"), live, CTX)
+    assert len(opts) == 1
+    assert 'set name "Allow WEB-SRV to DB-SRV"' in opts[0].cli[0]
+
+
+def test_fix_unnamed_falls_back_when_src_is_any():
+    live = {"comments": "", "srcaddr": ["all"], "dstaddr": ["DB-SRV"]}
+    opts = _fix_unnamed(_finding("unnamed"), live, CTX)
+    assert "Unknown -- Requires additional research" in opts[0].cli[0]
+
+
+def test_fix_unnamed_truncates_name_to_35_chars():
+    live = {"comments": "", "srcaddr": ["A-VERY-LONG-SOURCE-ADDRESS-NAME-INDEED"], "dstaddr": ["DST"]}
+    opts = _fix_unnamed(_finding("unnamed"), live, CTX)
+    # extract the quoted name value
+    line = [l for l in opts[0].cli[0].splitlines() if "set name" in l][0]
+    name = line.split('"')[1]
+    assert len(name) <= 35
