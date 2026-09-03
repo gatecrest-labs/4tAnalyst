@@ -249,7 +249,7 @@ Unit tests live in `tests/`. Run with `pytest -q tests/`. Test files:
 - `tests/test_fwanalyst_auth.py` — bearer middleware, ADOM token resolution, ContextVar injection, tool-aggregation count
 - `tests/test_fortimanager_adom_guard.py` — `_require_adom()` logic and `get_adoms()` filtering
 - `tests/test_rate_limit.py` — per-session call-budget middleware (window expiry, per-session isolation, 429 + Retry-After)
-- `tests/test_hygiene_parse.py`, `tests/test_hygiene_fix_logic.py`, `tests/test_hygiene_engine.py`, `tests/test_hygiene_report.py`, `tests/test_hygiene_mcp.py` — Rule Hygiene fix assessment (parsing, all 9 check generators, engine, HTML rendering, ADOM guard)
+- `tests/test_hygiene_parse.py`, `tests/test_hygiene_tag.py`, `tests/test_hygiene_models.py`, `tests/test_hygiene_fix_logic.py`, `tests/test_hygiene_engine.py`, `tests/test_hygiene_report.py`, `tests/test_hygiene_mcp.py` — Rule Hygiene fix assessment (parsing, tagging, models, all 9 check generators, engine, HTML rendering, ADOM guard)
 - `tests/test_policy_engine.py`, `tests/test_fortimanager_client.py`, `tests/test_zone_client.py`, `tests/test_zone_map.py`, `tests/test_render_report.py` — pre-existing suites
 
 CI (`smoke-tests.yml`) runs `unit-tests` (full `pytest -q tests/` with all packages installed) and `smoke-tests` (containerised auth-aware checks via `scripts/run_smoke.py` against the unified server).

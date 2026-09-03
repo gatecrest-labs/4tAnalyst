@@ -47,6 +47,28 @@ def test_render_html_lists_stale_findings_separately():
     assert "Gone" in html
 
 
+def test_render_html_lists_skipped_findings_separately():
+    result = HygieneResult(device="FW1", adom="OT-ADOM", pkg="pkg1",
+                            generated_at="2026-09-03T12:00:00+00:00", fixes=[],
+                            skipped_findings=[{"policy_id": "42", "policy_name": "Unrecognized",
+                                                "check": "some_future_check",
+                                                "reason": "no fix generator registered for check 'some_future_check'"}])
+    html = render_html(result)
+    assert "Skipped findings" in html
+    assert "Unrecognized" in html
+    assert "some_future_check" in html
+
+
+def test_render_html_shows_finding_detail_text():
+    fix = PolicyFix(policy_id="1", policy_name="P1", check="unhit", detail="No hits in the last 90 days.", options=[
+        FixOption("A", "Disable", "disable it", [], None),
+    ])
+    result = HygieneResult(device="FW1", adom="OT-ADOM", pkg="pkg1",
+                            generated_at="2026-09-03T12:00:00+00:00", fixes=[fix], stale_findings=[])
+    html = render_html(result)
+    assert "No hits in the last 90 days." in html
+
+
 def test_render_html_escapes_untrusted_text():
     fix = PolicyFix(policy_id="1", policy_name="<script>alert(1)</script>", check="unhit", options=[
         FixOption("A", "Disable", "disable it", [], None),

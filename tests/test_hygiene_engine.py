@@ -31,6 +31,14 @@ def test_assess_matches_findings_to_live_policies_by_id():
     assert result.stale_findings == []
 
 
+def test_assess_carries_finding_detail_into_policy_fix():
+    result = assess(
+        [_finding("1", "unhit", detail="no hits in 90 days")], {"pkg1": LIVE}, "FW1", "OT-ADOM", "pkg1",
+        now=date(2026, 9, 3),
+    )
+    assert result.fixes[0].detail == "no hits in 90 days"
+
+
 def test_assess_marks_missing_policy_id_as_stale():
     result = assess(
         [_finding("99", "unhit")], {"pkg1": LIVE}, "FW1", "OT-ADOM", "pkg1",
@@ -49,6 +57,8 @@ def test_assess_skips_unrecognized_check_without_error():
     )
     assert result.fixes == []
     assert result.stale_findings == []
+    assert len(result.skipped_findings) == 1
+    assert result.skipped_findings[0]["check"] == "some_future_check"
 
 
 def test_assess_raises_when_package_missing_from_fetch():

@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from hygiene.tag import append_tag, find_tag, MAX_COMMENT_LEN
+from hygiene.tag import MAX_COMMENT_LEN, append_tag, find_tag
 
 
 def test_append_tag_to_empty_comment():

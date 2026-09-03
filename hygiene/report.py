@@ -29,6 +29,17 @@ def render_html(result: HygieneResult) -> str:
         )
         stale_html = f"<h2>Stale findings</h2><ul>{rows}</ul>"
 
+    skipped_html = ""
+    if result.skipped_findings:
+        rows = "".join(
+            f"<li>Policy {html.escape(str(f.get('policy_id')))} "
+            f"({html.escape(str(f.get('policy_name')))}) — "
+            f"check '{html.escape(str(f.get('check')))}': "
+            f"{html.escape(str(f.get('reason')))}</li>"
+            for f in result.skipped_findings
+        )
+        skipped_html = f"<h2>Skipped findings</h2><ul>{rows}</ul>"
+
     title = f"Hygiene Fixes — {result.device}_{result.pkg}"
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
@@ -40,7 +51,7 @@ def render_html(result: HygieneResult) -> str:
         ".irreversible{color:#991b1b;font-weight:700}"
         "pre{background:#f3f4f6;padding:0.75rem;overflow-x:auto}"
         "</style>"
-        f"</head><body>{banner}{cards}{stale_html}</body></html>"
+        f"</head><body>{banner}{cards}{stale_html}{skipped_html}</body></html>"
     )
 
 
@@ -58,10 +69,12 @@ def _render_fix_card(fix: PolicyFix) -> str:
             f"<p>{html.escape(opt.description)}</p>{cli_html}"
             "</div>"
         )
+    detail_html = f"<p class='detail'>{html.escape(fix.detail)}</p>" if fix.detail else ""
     return (
         "<div class='finding'>"
         f"<h3>{html.escape(fix.check)} — {html.escape(fix.policy_name)} "
         f"(id {html.escape(fix.policy_id)})</h3>"
+        f"{detail_html}"
         f"{''.join(opts_html)}"
         "</div>"
     )

@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from hygiene.models import Finding, FixOption, PolicyFix, HygieneResult
+from hygiene.models import Finding, FixOption, HygieneResult, PolicyFix
 
 
 def test_finding_round_trip():

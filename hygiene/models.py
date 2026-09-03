@@ -80,6 +80,7 @@ class PolicyFix:
     policy_name: str
     check: str
     options: list[FixOption] = field(default_factory=list)
+    detail: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -87,6 +88,7 @@ class PolicyFix:
             "policy_name": self.policy_name,
             "check": self.check,
             "options": [o.to_dict() for o in self.options],
+            "detail": self.detail,
         }
 
 
@@ -98,6 +100,7 @@ class HygieneResult:
     generated_at: str
     fixes: list[PolicyFix] = field(default_factory=list)
     stale_findings: list[dict] = field(default_factory=list)
+    skipped_findings: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -107,4 +110,5 @@ class HygieneResult:
             "generated_at": self.generated_at,
             "fixes": [f.to_dict() for f in self.fixes],
             "stale_findings": list(self.stale_findings),
+            "skipped_findings": list(self.skipped_findings),
         }

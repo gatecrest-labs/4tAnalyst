@@ -26,7 +26,14 @@ from fortimanager_mcp import query as _query
 from fortimanager_mcp.client import FortiManagerClient
 from fwanalyst_server.context import allowed_adoms_var
 from hygiene.engine import assess as _assess
-from hygiene.models import Finding, HygieneDataError, HygieneParseError, PolicyFix, FixOption, HygieneResult
+from hygiene.models import (
+    Finding,
+    FixOption,
+    HygieneDataError,
+    HygieneParseError,
+    HygieneResult,
+    PolicyFix,
+)
 from hygiene.parse import parse_csv, parse_json
 from hygiene.report import render_html
 from mcp_common.errors import safe_error
@@ -180,7 +187,7 @@ def assess_hygiene_fixes(
 
     try:
         parsed_findings = [Finding(**_finding_kwargs(f)) for f in findings]
-    except (TypeError, KeyError) as e:
+    except (TypeError, KeyError, ValueError) as e:
         return {"error": f"malformed findings: {e}", "error_code": "invalid_input"}
 
     try:
@@ -218,6 +225,7 @@ def render_hygiene_report(assessment: dict[str, Any]) -> dict[str, Any]:
             PolicyFix(
                 policy_id=f["policy_id"], policy_name=f["policy_name"], check=f["check"],
                 options=[FixOption(**o) for o in f.get("options", [])],
+                detail=f.get("detail", ""),
             )
             for f in assessment["fixes"]
         ]
@@ -225,6 +233,7 @@ def render_hygiene_report(assessment: dict[str, Any]) -> dict[str, Any]:
             device=assessment["device"], adom=assessment["adom"], pkg=assessment["pkg"],
             generated_at=assessment["generated_at"], fixes=fixes,
             stale_findings=assessment.get("stale_findings", []),
+            skipped_findings=assessment.get("skipped_findings", []),
         )
         return {"html_content": render_html(result)}
     except Exception as e:

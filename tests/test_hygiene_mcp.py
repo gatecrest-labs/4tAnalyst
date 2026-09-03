@@ -116,6 +116,19 @@ def test_assess_hygiene_fixes_fetch_failure_surfaces_error(monkeypatch):
     assert result["error_code"] == "upstream_error"
 
 
+def test_assess_hygiene_fixes_non_numeric_seq_returns_error_not_exception():
+    findings = [{"policy_id": "1", "policy_name": "P1", "seq": "not-a-number", "check": "unhit", "detail": "d"}]
+    token = allowed_adoms_var.set({"*"})
+    try:
+        result = hygiene_server.assess_hygiene_fixes(
+            adom="OT-ADOM", device="FW1", pkg="pkg1", findings=findings,
+        )
+    finally:
+        allowed_adoms_var.reset(token)
+    assert result["error_code"] == "invalid_input"
+    assert "error" in result
+
+
 def test_render_hygiene_report_rebuilds_html_from_assessment_dict():
     assessment = {
         "device": "FW1", "adom": "OT-ADOM", "pkg": "pkg1",

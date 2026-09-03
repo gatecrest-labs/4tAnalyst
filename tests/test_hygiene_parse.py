@@ -6,7 +6,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from hygiene.models import HygieneParseError
-from hygiene.parse import parse_json, parse_csv
+from hygiene.parse import parse_csv, parse_json
 
 
 def test_parse_json_bare_list():

@@ -5,8 +5,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from hygiene.fix_logic import (
-    FixContext, _fix_unhit, _fix_expired, _fix_unlogged,
-    _fix_missing_security_profile, _fix_redundant, _fix_unnamed, _fix_over_permissive,
+    FixContext,
+    _fix_expired,
+    _fix_missing_security_profile,
+    _fix_over_permissive,
+    _fix_redundant,
+    _fix_unhit,
+    _fix_unlogged,
+    _fix_unnamed,
 )
 from hygiene.models import Finding
 
@@ -147,7 +153,7 @@ def test_fix_disabled_old_tag_proposes_delete():
     assert opts[0].irreversible is True
 
 
-from hygiene.fix_logic import _fix_shadow, build_fix, _FIX_FNS
+from hygiene.fix_logic import _FIX_FNS, _fix_shadow, build_fix
 
 
 def test_fix_shadow_option_a_always_present():
@@ -202,6 +208,22 @@ def test_fix_shadow_option_c_absent_when_also_redundant():
                                                   "srcaddr": ["GRP-ALL-SRC"], "dstaddr": ["D1"]})
     ctx = FixContext(now=date(2026, 9, 3), redundant_policy_ids={"1"})
     opts = _fix_shadow(finding, live, ctx)
+    assert not [o for o in opts if o.option_id == "C"]
+
+
+def test_fix_shadow_option_b_absent_when_shadowing_id_has_injection():
+    live = {"comments": "", "srcaddr": ["S1"], "dstaddr": ["D1"], "action": "deny"}
+    finding = _finding("shadow", shadowing_rule={"policy_id": "5\n    delete 12", "action": "accept",
+                                                  "srcaddr": ["all"], "dstaddr": ["all"]})
+    opts = _fix_shadow(finding, live, CTX)
+    assert not [o for o in opts if o.option_id == "B"]
+
+
+def test_fix_shadow_option_c_absent_when_shadowing_id_non_numeric():
+    live = {"comments": "", "srcaddr": ["S1"], "dstaddr": ["D1"], "action": "accept"}
+    finding = _finding("shadow", shadowing_rule={"policy_id": "not-a-number", "action": "accept",
+                                                  "srcaddr": ["GRP-ALL-SRC"], "dstaddr": ["D1"]})
+    opts = _fix_shadow(finding, live, CTX)
     assert not [o for o in opts if o.option_id == "C"]
 
 

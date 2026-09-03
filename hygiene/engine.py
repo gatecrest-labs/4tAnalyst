@@ -37,6 +37,7 @@ def assess(
 
     fixes: list[PolicyFix] = []
     stale: list[dict] = []
+    skipped: list[dict] = []
     for finding in findings:
         live_policy = by_id.get(finding.policy_id)
         if live_policy is None:
@@ -51,13 +52,20 @@ def assess(
 
         options = build_fix(finding, live_policy, ctx)
         if options is None:
-            continue  # unrecognized check — defensive skip, not an error
+            # unrecognized check — defensive skip, not an error, but still
+            # surfaced so an engineer sees why a finding produced no fix card
+            skipped.append({
+                **finding.to_dict(),
+                "reason": f"no fix generator registered for check '{finding.check}'",
+            })
+            continue
 
         fixes.append(PolicyFix(
             policy_id=finding.policy_id,
             policy_name=finding.policy_name,
             check=finding.check,
             options=options,
+            detail=finding.detail,
         ))
 
     return HygieneResult(
@@ -67,4 +75,5 @@ def assess(
         generated_at=datetime.now(UTC).isoformat(),
         fixes=fixes,
         stale_findings=stale,
+        skipped_findings=skipped,
     )

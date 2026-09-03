@@ -12,6 +12,7 @@ already works with), never the normalized `search_policies` summary shape.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -74,6 +75,13 @@ def _wrap_move(policy_id: str, before_id) -> str:
         f"    move {policy_id} before {before_id}\n"
         "end"
     )
+
+
+def _is_safe_policy_ref(value) -> bool:
+    """A policy/rule ID reference is safe to embed unquoted in CLI only if
+    it's purely numeric — this is what keeps a doctored finding's
+    shadowing_rule.policy_id from injecting extra CLI lines via _wrap_move."""
+    return bool(re.fullmatch(r"\d+", str(value).strip()))
 
 
 def _wrap_delete(policy_id: str) -> str:
@@ -215,7 +223,8 @@ def _fix_shadow(finding: Finding, live_policy: dict, ctx: FixContext) -> list[Fi
     shadowing_action = str(shadowing.get("action", "")).lower()
     shadowing_id = shadowing.get("policy_id") or shadowing.get("rule_id") or shadowing.get("id")
 
-    if shadowing_id and shadowed_action and shadowing_action and shadowed_action != shadowing_action:
+    if (shadowing_id and _is_safe_policy_ref(shadowing_id) and shadowed_action
+            and shadowing_action and shadowed_action != shadowing_action):
         move_cli = _wrap_move(finding.policy_id, shadowing_id)
         options.append(FixOption(
             "B", "Reorder above the shadowing rule",
@@ -234,7 +243,7 @@ def _fix_shadow(finding: Finding, live_policy: dict, ctx: FixContext) -> list[Fi
 
 def _shadow_narrow_option(finding: Finding, live_policy: dict, shadowing: dict) -> FixOption | None:
     shadowing_id = shadowing.get("policy_id") or shadowing.get("rule_id") or shadowing.get("id")
-    if not shadowing_id:
+    if not shadowing_id or not _is_safe_policy_ref(shadowing_id):
         return None
 
     my_src = set(_addr_list(live_policy.get("srcaddr")))
