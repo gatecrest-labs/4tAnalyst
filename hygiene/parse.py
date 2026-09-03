@@ -6,11 +6,12 @@ design doc): the interactive UI export writes a clean single-header CSV,
 but the scheduled-job attachment prepends `#`-comment metadata rows and a
 blank line before the real header, and can append trailing `# Unused
 Addresses`/`# Unused Services` sections after the findings. Both are real,
-expected inputs. See parse_csv (added in the next task).
+expected inputs. See parse_csv.
 """
 
 from __future__ import annotations
 
+import csv
 import json
 
 from hygiene.models import Finding, HygieneParseError
@@ -67,3 +68,44 @@ def _finding_from_dict(item: dict) -> Finding:
         shadowing_rule=item.get("shadowing_rule"),
         duplicate_of=item.get("duplicate_of"),
     )
+
+
+_REQUIRED_CSV_COLS = {"Policy ID", "Policy Name", "Seq", "Check", "Detail"}
+
+
+def parse_csv(text: str) -> list[Finding]:
+    lines = text.splitlines()
+    header_idx = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped.upper().startswith("ERROR,"):
+            continue
+        cols = {c.strip() for c in next(csv.reader([line]))}
+        if _REQUIRED_CSV_COLS.issubset(cols):
+            header_idx = i
+        break
+
+    if header_idx is None:
+        raise HygieneParseError(
+            "no findings header row found in CSV input "
+            "(expected columns: Policy ID, Policy Name, Seq, Check, Detail)"
+        )
+
+    data_lines = []
+    for line in lines[header_idx + 1:]:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            break
+        data_lines.append(line)
+
+    reader = csv.DictReader([lines[header_idx]] + data_lines)
+    findings = []
+    for row in reader:
+        findings.append(_finding_from_dict({
+            "policy_id": row.get("Policy ID", ""),
+            "policy_name": row.get("Policy Name", ""),
+            "seq": row.get("Seq", "0"),
+            "check": row.get("Check", ""),
+            "detail": row.get("Detail", ""),
+        }))
+    return findings
