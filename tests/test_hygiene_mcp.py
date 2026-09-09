@@ -4,6 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from fortimanager_mcp.client import FortiManagerAPIError
 from hygiene_mcp.server import parse_hygiene_findings
 
 
@@ -54,6 +55,13 @@ class _FakeClient:
     def __enter__(self): return self
     def __exit__(self, *a): pass
     def get_policy_packages(self, adom): return []  # no-op; no underscore→slash translation
+    def get_policies(self, adom, pkg): return _LIVE
+
+
+class _FakeClientWithFailingPolicies(_FakeClient):
+    """Simulates FortiManager returning an error for the policy fetch."""
+    def get_policies(self, adom, pkg):
+        raise FortiManagerAPIError("Object does not exist")
 
 
 def _one_finding():
@@ -72,10 +80,7 @@ def test_assess_hygiene_fixes_blocked_by_adom_guard():
 
 
 def test_assess_hygiene_fixes_happy_path(monkeypatch):
-    from fortimanager_mcp import query as _query
-
     monkeypatch.setattr(hygiene_server, "_fortimanager_client", lambda: _FakeClient())
-    monkeypatch.setattr(_query, "get_device_policies", lambda c, adom, pkgs: {"pkg1": _LIVE})
 
     token = allowed_adoms_var.set({"*"})
     try:
@@ -103,10 +108,9 @@ def test_assess_hygiene_fixes_missing_pkg_returns_error():
 
 
 def test_assess_hygiene_fixes_fetch_failure_surfaces_error(monkeypatch):
-    from fortimanager_mcp import query as _query
-
-    monkeypatch.setattr(hygiene_server, "_fortimanager_client", lambda: _FakeClient())
-    monkeypatch.setattr(_query, "get_device_policies", lambda c, adom, pkgs: {"pkg1": None})
+    monkeypatch.setattr(
+        hygiene_server, "_fortimanager_client", lambda: _FakeClientWithFailingPolicies()
+    )
 
     token = allowed_adoms_var.set({"*"})
     try:
@@ -116,6 +120,7 @@ def test_assess_hygiene_fixes_fetch_failure_surfaces_error(monkeypatch):
     finally:
         allowed_adoms_var.reset(token)
     assert result["error_code"] == "upstream_error"
+    assert "Object does not exist" in result["error"]
 
 
 def test_assess_hygiene_fixes_non_numeric_seq_returns_error_not_exception():
@@ -167,16 +172,14 @@ class _FakeClientWithPackages(_FakeClient):
 
 def test_assess_hygiene_fixes_underscore_pkg_resolved_to_slash(monkeypatch):
     """Display-form pkg (DEVICE_VDOM) is translated to FMG path (DEVICE/VDOM)."""
-    from fortimanager_mcp import query as _query
-
     captured_pkgs: list[str] = []
 
-    def _fake_get_device_policies(c, adom, pkgs):
-        captured_pkgs.extend(pkgs)
-        return {pkgs[0]: _LIVE}
+    class _CapturingClient(_FakeClientWithPackages):
+        def get_policies(self, adom, pkg):
+            captured_pkgs.append(pkg)
+            return _LIVE
 
-    monkeypatch.setattr(hygiene_server, "_fortimanager_client", lambda: _FakeClientWithPackages())
-    monkeypatch.setattr(_query, "get_device_policies", _fake_get_device_policies)
+    monkeypatch.setattr(hygiene_server, "_fortimanager_client", lambda: _CapturingClient())
 
     token = allowed_adoms_var.set({"*"})
     try:
@@ -195,16 +198,14 @@ def test_assess_hygiene_fixes_underscore_pkg_resolved_to_slash(monkeypatch):
 
 def test_assess_hygiene_fixes_slash_pkg_passes_unchanged(monkeypatch):
     """Canonical slash-form pkg bypasses the package-list lookup and is used as-is."""
-    from fortimanager_mcp import query as _query
-
     captured_pkgs: list[str] = []
 
-    def _fake_get_device_policies(c, adom, pkgs):
-        captured_pkgs.extend(pkgs)
-        return {pkgs[0]: _LIVE}
+    class _CapturingClient(_FakeClient):
+        def get_policies(self, adom, pkg):
+            captured_pkgs.append(pkg)
+            return _LIVE
 
-    monkeypatch.setattr(hygiene_server, "_fortimanager_client", lambda: _FakeClient())
-    monkeypatch.setattr(_query, "get_device_policies", _fake_get_device_policies)
+    monkeypatch.setattr(hygiene_server, "_fortimanager_client", lambda: _CapturingClient())
 
     token = allowed_adoms_var.set({"*"})
     try:

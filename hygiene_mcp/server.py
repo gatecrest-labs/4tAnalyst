@@ -23,8 +23,7 @@ import yaml
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-from fortimanager_mcp import query as _query
-from fortimanager_mcp.client import FortiManagerClient
+from fortimanager_mcp.client import FortiManagerAPIError, FortiManagerClient
 from fwanalyst_server.context import allowed_adoms_var
 from hygiene.engine import assess as _assess
 from hygiene.models import (
@@ -154,8 +153,15 @@ def _require_adom(adom: str) -> dict | None:
     }
 
 
-def _resolve_pkg(client: FortiManagerClient, adom: str, pkg: str) -> str:
+def _resolve_pkg(
+    client: FortiManagerClient, adom: str, pkg: str
+) -> tuple[str, str | None]:
     """Translate display-form pkg name to the FortiManager canonical path.
+
+    Returns (resolved_pkg, diagnostic_or_None). diagnostic_or_None is non-None
+    when resolution fell back to the input string — callers should include it
+    in any subsequent error response so the engineer knows why the name was not
+    translated.
 
     The 4thealth hygiene export and frontend represent per-VDOM device
     packages as DEVICE_VDOM (underscore). FortiManager's policy API path
@@ -166,7 +172,7 @@ def _resolve_pkg(client: FortiManagerClient, adom: str, pkg: str) -> str:
     real names are unaffected.
     """
     if "/" in pkg:
-        return pkg
+        return pkg, None
     try:
         packages = client.get_policy_packages(adom)
         display_map = {
@@ -177,24 +183,26 @@ def _resolve_pkg(client: FortiManagerClient, adom: str, pkg: str) -> str:
         resolved = display_map.get(pkg)
         if resolved and resolved != pkg:
             logger.info("Resolved pkg %r → %r for ADOM %s", pkg, resolved, adom)
-            return resolved
+            return resolved, None
         if display_map:
-            logger.warning(
-                "pkg %r not found in ADOM %s package list (known display names: %s); "
-                "using as-is — verify the package name in FortiManager",
-                pkg, adom, sorted(display_map.keys()),
+            diag = (
+                f"package {pkg!r} not found in ADOM {adom!r} package list "
+                f"(known: {sorted(display_map.keys())}); "
+                "pass the FortiManager canonical path (DEVICE/VDOM) to avoid this"
             )
+            logger.warning(diag)
+            return pkg, diag
         else:
-            logger.warning(
-                "pkg %r not resolved: ADOM %s returned no packages; using as-is",
-                pkg, adom,
-            )
+            diag = f"ADOM {adom!r} returned no packages from FortiManager"
+            logger.warning("pkg %r not resolved: %s; using as-is", pkg, diag)
+            return pkg, diag
     except Exception as exc:
+        diag = f"package list lookup for ADOM {adom!r} failed: {exc}"
         logger.warning(
             "pkg resolution lookup failed for %r in ADOM %s (%s); using as-is",
             pkg, adom, exc,
         )
-    return pkg
+        return pkg, diag
 
 
 def _finding_kwargs(d: dict) -> dict:
@@ -256,12 +264,24 @@ def assess_hygiene_fixes(
 
     try:
         with _fortimanager_client() as client:
-            pkg = _resolve_pkg(client, adom, pkg)
-            live_by_pkg = _query.get_device_policies(client, adom, [pkg])
+            pkg, resolve_diag = _resolve_pkg(client, adom, pkg)
+            try:
+                live_policies = [
+                    p for p in client.get_policies(adom, pkg) if isinstance(p, dict)
+                ]
+            except FortiManagerAPIError as exc:
+                msg = (
+                    f"FortiManager fetch failed for package {pkg!r} "
+                    f"in ADOM {adom!r}: {exc}"
+                )
+                if resolve_diag:
+                    msg += f". Resolution note: {resolve_diag}"
+                return {"error": msg, "error_code": "upstream_error"}
     except Exception as e:
         message, code = safe_error(e)
         return {"error": message, "error_code": code}
 
+    live_by_pkg = {pkg: live_policies}
     try:
         result = _assess(parsed_findings, live_by_pkg, device, adom, pkg)
     except HygieneDataError as e:
