@@ -176,10 +176,24 @@ def _resolve_pkg(client: FortiManagerClient, adom: str, pkg: str) -> str:
         }
         resolved = display_map.get(pkg)
         if resolved and resolved != pkg:
-            logger.debug("Resolved pkg %r → %r for ADOM %s", pkg, resolved, adom)
+            logger.info("Resolved pkg %r → %r for ADOM %s", pkg, resolved, adom)
             return resolved
-    except Exception:
-        logger.debug("pkg resolution lookup failed for %r in %s, using as-is", pkg, adom)
+        if display_map:
+            logger.warning(
+                "pkg %r not found in ADOM %s package list (known display names: %s); "
+                "using as-is — verify the package name in FortiManager",
+                pkg, adom, sorted(display_map.keys()),
+            )
+        else:
+            logger.warning(
+                "pkg %r not resolved: ADOM %s returned no packages; using as-is",
+                pkg, adom,
+            )
+    except Exception as exc:
+        logger.warning(
+            "pkg resolution lookup failed for %r in ADOM %s (%s); using as-is",
+            pkg, adom, exc,
+        )
     return pkg
 
 
