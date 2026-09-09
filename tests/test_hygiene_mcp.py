@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -52,6 +53,7 @@ _LIVE = [
 class _FakeClient:
     def __enter__(self): return self
     def __exit__(self, *a): pass
+    def get_policy_packages(self, adom): return []  # no-op; no underscore→slash translation
 
 
 def _one_finding():
@@ -151,3 +153,100 @@ def test_render_hygiene_report_rebuilds_html_from_assessment_dict():
 def test_render_hygiene_report_malformed_input_returns_error():
     result = hygiene_server.render_hygiene_report({"device": "FW1"})  # missing required keys
     assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: underscore→slash pkg normalization
+# ---------------------------------------------------------------------------
+
+class _FakeClientWithPackages(_FakeClient):
+    """Fake client that advertises one per-VDOM package in slash form."""
+    def get_policy_packages(self, adom):
+        return [{"name": "MNHQGOFWNPVS01/MNHOIN99", "type": "pkg"}]
+
+
+def test_assess_hygiene_fixes_underscore_pkg_resolved_to_slash(monkeypatch):
+    """Display-form pkg (DEVICE_VDOM) is translated to FMG path (DEVICE/VDOM)."""
+    from fortimanager_mcp import query as _query
+
+    captured_pkgs: list[str] = []
+
+    def _fake_get_device_policies(c, adom, pkgs):
+        captured_pkgs.extend(pkgs)
+        return {pkgs[0]: _LIVE}
+
+    monkeypatch.setattr(hygiene_server, "_fortimanager_client", lambda: _FakeClientWithPackages())
+    monkeypatch.setattr(_query, "get_device_policies", _fake_get_device_policies)
+
+    token = allowed_adoms_var.set({"*"})
+    try:
+        result = hygiene_server.assess_hygiene_fixes(
+            adom="ENTERPRISE-DEV",
+            device="MNHQGOFWNPVS01",
+            pkg="MNHQGOFWNPVS01_MNHOIN99",  # underscore (display form from export)
+            findings=_one_finding(),
+        )
+    finally:
+        allowed_adoms_var.reset(token)
+
+    assert "error" not in result
+    assert captured_pkgs == ["MNHQGOFWNPVS01/MNHOIN99"]  # slash (canonical) sent to FMG
+
+
+def test_assess_hygiene_fixes_slash_pkg_passes_unchanged(monkeypatch):
+    """Canonical slash-form pkg bypasses the package-list lookup and is used as-is."""
+    from fortimanager_mcp import query as _query
+
+    captured_pkgs: list[str] = []
+
+    def _fake_get_device_policies(c, adom, pkgs):
+        captured_pkgs.extend(pkgs)
+        return {pkgs[0]: _LIVE}
+
+    monkeypatch.setattr(hygiene_server, "_fortimanager_client", lambda: _FakeClient())
+    monkeypatch.setattr(_query, "get_device_policies", _fake_get_device_policies)
+
+    token = allowed_adoms_var.set({"*"})
+    try:
+        result = hygiene_server.assess_hygiene_fixes(
+            adom="ENTERPRISE-DEV",
+            device="MNHQGOFWNPVS01",
+            pkg="MNHQGOFWNPVS01/MNHOIN99",  # already canonical
+            findings=_one_finding(),
+        )
+    finally:
+        allowed_adoms_var.reset(token)
+
+    assert "error" not in result
+    assert captured_pkgs == ["MNHQGOFWNPVS01/MNHOIN99"]
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: parse_hygiene_findings returns meta from JSON export
+# ---------------------------------------------------------------------------
+
+def test_parse_hygiene_findings_returns_meta_from_json_export():
+    """meta dict from the hygiene export is included in the parse response."""
+    export = json.dumps({
+        "meta": {
+            "package": "MNHQGOFWNPVS01_MNHOIN99",
+            "adom": "ENTERPRISE-DEV",
+            "generated": "2026-09-09T00:00:00Z",
+        },
+        "findings": [
+            {"policy_id": "1", "policy_name": "P1", "seq": 1, "check": "unhit", "detail": "d"}
+        ],
+    })
+    result = parse_hygiene_findings(text=export, file_type="json")
+    assert "error" not in result
+    assert result["findings"][0]["policy_id"] == "1"
+    assert result["meta"]["package"] == "MNHQGOFWNPVS01_MNHOIN99"
+    assert result["meta"]["adom"] == "ENTERPRISE-DEV"
+
+
+def test_parse_hygiene_findings_meta_empty_for_list_form_json():
+    """List-form JSON (no metadata envelope) returns an empty meta dict."""
+    text = '[{"policy_id": "1", "policy_name": "P1", "seq": 1, "check": "unhit", "detail": "d"}]'
+    result = parse_hygiene_findings(text=text, file_type="json")
+    assert "error" not in result
+    assert result.get("meta") == {}

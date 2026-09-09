@@ -12,6 +12,7 @@ Run locally (stdio):
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from functools import lru_cache
@@ -69,18 +70,34 @@ def parse_hygiene_findings(
                    both are given
     file_type    : str — "json" or "csv"
 
-    Returns {"findings": [...]} or {"error": ..., "error_code": ...}.
+    Returns {"findings": [...], "meta": {...}} on success, where "meta" is the
+    top-level metadata dict from the export (e.g. package name, ADOM, timestamp).
+    Pass meta["package"] directly to assess_hygiene_fixes as the pkg argument —
+    both underscore (display) and slash (canonical) forms are accepted there.
+    Returns {"error": ..., "error_code": ...} on failure.
     """
     raw = file_content if file_content.strip() else text
     if not raw.strip():
         return {"error": "no findings text or file content provided", "error_code": "invalid_input"}
     if file_type not in ("json", "csv"):
         return {"error": f"file_type must be 'json' or 'csv', got {file_type!r}", "error_code": "invalid_input"}
+
+    meta: dict = {}
+    if file_type == "json":
+        try:
+            _data = json.loads(raw)
+            if isinstance(_data, dict):
+                _raw_meta = _data.get("meta", {})
+                if isinstance(_raw_meta, dict):
+                    meta = _raw_meta
+        except Exception:
+            pass  # parse_json will surface the real error below
+
     try:
         findings = parse_json(raw) if file_type == "json" else parse_csv(raw)
     except HygieneParseError as e:
         return {"error": str(e), "error_code": "parse_error"}
-    return {"findings": [f.to_dict() for f in findings]}
+    return {"findings": [f.to_dict() for f in findings], "meta": meta}
 
 
 @lru_cache(maxsize=1)
@@ -137,6 +154,35 @@ def _require_adom(adom: str) -> dict | None:
     }
 
 
+def _resolve_pkg(client: FortiManagerClient, adom: str, pkg: str) -> str:
+    """Translate display-form pkg name to the FortiManager canonical path.
+
+    The 4thealth hygiene export and frontend represent per-VDOM device
+    packages as DEVICE_VDOM (underscore). FortiManager's policy API path
+    uses DEVICE/VDOM (slash). If pkg already contains a slash it is returned
+    unchanged. Otherwise the ADOM package list is fetched once and a
+    display→canonical map is built. Falls back to the original string if the
+    lookup fails or finds no match, so flat packages with underscores in their
+    real names are unaffected.
+    """
+    if "/" in pkg:
+        return pkg
+    try:
+        packages = client.get_policy_packages(adom)
+        display_map = {
+            p["name"].replace("/", "_"): p["name"]
+            for p in packages
+            if isinstance(p, dict) and p.get("name")
+        }
+        resolved = display_map.get(pkg)
+        if resolved and resolved != pkg:
+            logger.debug("Resolved pkg %r → %r for ADOM %s", pkg, resolved, adom)
+            return resolved
+    except Exception:
+        logger.debug("pkg resolution lookup failed for %r in %s, using as-is", pkg, adom)
+    return pkg
+
+
 def _finding_kwargs(d: dict) -> dict:
     return {
         "policy_id": str(d["policy_id"]),
@@ -168,7 +214,11 @@ def assess_hygiene_fixes(
     adom     : str        — ADOM name
     device   : str        — device name (display only; not used to scope
                the fetch, since policies belong to packages, not devices)
-    pkg      : str        — policy package name the hygiene run was against
+    pkg      : str        — policy package name the hygiene run was against.
+               Accepts both the 4thealth display form (DEVICE_VDOM, underscore)
+               and the FortiManager canonical path form (DEVICE/VDOM, slash).
+               The display form is automatically resolved to the canonical path
+               via a one-time package-list lookup.
     findings : list[dict] — findings from parse_hygiene_findings
 
     Returns the assessment dict plus html_content/html_error, or
@@ -192,6 +242,7 @@ def assess_hygiene_fixes(
 
     try:
         with _fortimanager_client() as client:
+            pkg = _resolve_pkg(client, adom, pkg)
             live_by_pkg = _query.get_device_policies(client, adom, [pkg])
     except Exception as e:
         message, code = safe_error(e)
