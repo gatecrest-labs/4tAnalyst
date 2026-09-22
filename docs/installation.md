@@ -127,7 +127,15 @@ sudo -u 4tanalyst bash -c "cd /opt/4tanalyst && cp credentials.yaml.example cred
 sudo -u 4tanalyst nano /opt/4tanalyst/credentials.yaml
 ```
 
-### 9. Start the servers
+### 9. Set up your organisation's naming conventions
+
+The server ships with generic placeholder naming conventions. Before going live, generate a `naming.local.yaml` override that reflects your organisation's real FortiGate object-naming standards.
+
+See **`docs/naming-convention.md`** for full instructions, including a ready-made AI prompt you can use with your existing naming policy document (Word, PDF, or screenshot) to produce the file in minutes.
+
+The file lives at `standards_mcp/naming.local.yaml` and is gitignored — it will never be committed to the repository.
+
+### 10. Start the servers
 
 For initial testing, start the server manually. Host/port are set via
 `FASTMCP_HOST`/`FASTMCP_PORT` env vars, not CLI flags — the installed
@@ -143,7 +151,7 @@ sudo -u 4tanalyst bash -c "
 
 For production, use Docker Compose — see `docker-compose.yml` in the repository root.
 
-### 8. Enable automatic startup on boot (RHEL/Linux)
+### 11. Enable automatic startup on boot (RHEL/Linux)
 
 A systemd unit file is included at `systemd/4tanalyst.service`. It runs the server as the `4tanalyst` user and restarts it automatically on failure.
 
@@ -184,7 +192,7 @@ The service will now start automatically on every reboot. To view logs:
 sudo journalctl -u 4tanalyst -f
 ```
 
-### 9. Smoke test
+### 12. Smoke test
 
 From the server, verify auth is enforced using either the pure-Python tester or the shell script:
 

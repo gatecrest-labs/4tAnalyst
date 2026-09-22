@@ -33,6 +33,10 @@ device_zone_map.yaml
 standards_mcp/policy_db.json
 standards_mcp/policy-data/
 
+# Org-specific naming convention override — generated locally, never committed
+# See docs/naming-convention.md for how to create this file
+standards_mcp/naming.local.yaml
+
 # Local Claude Code hook scripts — machine-specific, not portable
 scripts/claude-sensitive-check.sh
 .githooks/post-commit

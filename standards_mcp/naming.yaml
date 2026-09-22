@@ -1,6 +1,12 @@
-# naming.yaml
-# Object naming conventions for FortiGate (FortiManager-managed).
-# Edit this file to match your team's actual standards.
+# naming.yaml — generic default naming conventions for FortiGate (FortiManager-managed).
+#
+# This file ships with the repo and contains neutral placeholder examples.
+# To use your organisation's real conventions, create naming.local.yaml in this
+# same directory — it is auto-loaded in place of this file and is gitignored so
+# it will never be committed.  See docs/naming-convention.md for instructions,
+# including a ready-made AI prompt to generate naming.local.yaml from your
+# existing policy document.
+#
 # Referenced by: get_naming_convention() and get_required_log_settings() MCP tools.
 
 platforms:
@@ -120,21 +126,19 @@ platforms:
 
 
 # Abbreviated zone names used in policy/rule naming conventions above.
+# Replace these with your organisation's actual zone names and abbreviations.
+# (The examples below are generic placeholders — see docs/naming-convention.md.)
 zone_abbrevs:
-  "NETZONE CIP-H-All": "CIPH"
-  "NETZONE CIP-H-ControlCenter": "CIPH_CC"
-  "NETZONE OT-All": "OT"
-  "NETZONE OT Mgmt": "OT_MGMT"
-  "NETZONE Gas-SCADA": "GAS_SCADA"
-  "NETZONE IT Corporate (non-user)": "IT_CORP"
-  "NETZONE IT DMZ": "IT_DMZ"
-  "NETZONE Corp Internal": "CORP_INT"
-  "Users Networks": "USERS"
+  "OT Network": "OT"
+  "OT Management": "OT_MGMT"
+  "IT Corporate": "IT_CORP"
+  "IT DMZ": "IT_DMZ"
+  "Corporate Internal": "CORP_INT"
+  "User Networks": "USERS"
   "Internet": "INET"
-  "Internet NAT": "INET_NAT"
   "Remote Access": "RA"
   "Public Cloud": "CLOUD"
-  "Misc-Unknown": "MISC"
+  "Unknown": "MISC"
 
 
 # Log settings referenced by get_required_log_settings().

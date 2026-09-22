@@ -108,3 +108,7 @@ Replace `<server>` with the 4tAnalyst server address and `<your-mcp-token>` with
 ## What's next
 
 Once connected, `docs/engineer-workflow.md` §2 walks through working an actual firewall request end-to-end with the six slash commands (`/analyze-request`, `/check-policy`, `/validate-rule`, `/generate-peer-review`, `/record-decision`, `/missing-info`).
+
+---
+
+> **Server admins / deployers:** before going live, generate your organisation's naming convention override so the tool enforces your real object-naming standards rather than the generic placeholders. See **`docs/naming-convention.md`** — it includes a ready-made AI prompt that turns your existing naming policy document (Word, PDF, or screenshot) into the override file. The file is gitignored and lives only on the server.
