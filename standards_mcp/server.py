@@ -21,10 +21,13 @@ Run as SSE server (for central deployment):
 """
 
 import json
+import logging
 import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 import yaml
 from mcp.server.fastmcp import FastMCP
@@ -37,12 +40,18 @@ from mcp.types import ToolAnnotations
 _HERE = Path(__file__).parent
 _POLICY_DB_PATH = _HERE / "policy_db.json"
 _NAMING_PATH = _HERE / "naming.yaml"
+_NAMING_LOCAL_PATH = _HERE / "naming.local.yaml"
 _REVIEW_PATH = _HERE / "review_requirements.yaml"
 
 # Allow overrides via environment variables for containerised deployments
 _POLICY_DB_PATH = Path(os.getenv("STANDARDS_POLICY_DB", str(_POLICY_DB_PATH)))
-_NAMING_PATH = Path(os.getenv("STANDARDS_NAMING_YAML", str(_NAMING_PATH)))
 _REVIEW_PATH = Path(os.getenv("STANDARDS_REVIEW_YAML", str(_REVIEW_PATH)))
+
+# Naming: env var beats naming.local.yaml beats naming.yaml
+if os.getenv("STANDARDS_NAMING_YAML"):
+    _NAMING_PATH = Path(os.environ["STANDARDS_NAMING_YAML"])
+elif _NAMING_LOCAL_PATH.exists():
+    _NAMING_PATH = _NAMING_LOCAL_PATH
 
 # ---------------------------------------------------------------------------
 # Data loading (cached — files are read once per process lifetime)
@@ -56,6 +65,8 @@ def _load_policy_db() -> dict:
 
 @lru_cache(maxsize=1)
 def _load_naming() -> dict:
+    if _NAMING_PATH != _HERE / "naming.yaml":
+        _log.info("standards: loading org-specific naming conventions from %s", _NAMING_PATH)
     with open(_NAMING_PATH, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
