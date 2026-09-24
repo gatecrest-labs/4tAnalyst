@@ -33,7 +33,7 @@ Rather than a full clone, use a sparse checkout so you only pull down `.claude/`
 ```bash
 git clone --filter=blob:none --sparse <repo-url> 4tanalyst-workstation
 cd 4tanalyst-workstation
-git sparse-checkout set .claude scripts .mcp.json.example
+git sparse-checkout set .claude scripts
 ```
 
 Your team access to this repo should be **read-only** — engineers use the checkout, they don't push changes to skills or server code. If you spot a bug in a skill or the naming conventions it enforces, report it to the FW engineering team (see `CONTRIBUTING.md`) rather than editing your local copy.
@@ -188,6 +188,88 @@ This logs the approved/rejected/deferred decision, your engineer ID, the ticket 
 
 ---
 
+## Working a Rule Hygiene run
+
+Rule Hygiene is a periodic audit (typically scheduled in the companion 4thealth-plus app) that flags policy issues: unnamed rules, disabled rules that have aged out, shadow relationships, over-permissive rules, redundant entries, unused objects, missing logging, and blanket `ANY` service objects. Once the run produces a findings export, `/analyze-hygiene` turns it into per-finding FortiGate CLI remediation without touching any device.
+
+### What you need
+
+- The findings export from the Rule Hygiene run — JSON or CSV format. Either the GUI export or the scheduled-job email attachment works.
+- The **ADOM**, **device name**, and **policy package** the run was against. The export file itself doesn't include this; you must supply it.
+
+### Running the workflow
+
+```
+/analyze-hygiene
+```
+
+Claude will prompt for the above and then:
+
+1. Parse and validate the findings. If the format is unrecognized, it reports exactly what was wrong — it never guesses at a shape.
+2. Re-fetch the **live** policy package from FortiManager and cross-reference it against the parsed findings. Findings whose `policy_id` no longer exists in the live package are segregated as **stale** (the rule may already have been fixed or deleted).
+3. For each active finding, run a deterministic fix generator. Every fix produces one or more `FixOption` entries, each with a human-readable description and an exact FortiGate CLI block.
+4. Save an HTML report to `output/hygiene/<device>_<pkg>_<date>.html`. Attach this to the change ticket alongside the CLI.
+
+### Interpreting the output
+
+**Stale findings** are listed first — they were skipped because the policy no longer exists in the live package. Confirm the rule was intentionally removed before treating these as resolved.
+
+**Fix options** — some findings offer multiple choices (for example, a `disabled` rule that is still within the 90-day tag window can be re-enabled, given an `EXEMPT` tag, or deleted; a `shadow` finding can be resolved by deleting the shadowed rule or merging it into the shadowing rule). Review each option and choose one before implementing.
+
+**Irreversible options** — the `disabled` check's `delete` path and the `redundant` check's `delete` path are explicitly called out in the output since they cannot be undone from the CLI. Confirm with your peer reviewer before executing those.
+
+**The generated CLI is not applied automatically.** Copy the block for each fix you choose and apply it in FortiManager or directly on the device during the change window.
+
+After applying fixes, run `/record-decision` to log the outcome.
+
+---
+
+## Working a PSIRT advisory
+
+When Fortinet publishes a security advisory (PSIRT), `/analyze-psirt` cross-references every device in every ADOM against the affected version ranges and produces a per-device verdict — no manual version lookups required.
+
+### What you need
+
+- The Fortinet PSIRT advisory email — either pasted text or an `.eml` file path.
+- No other input. The tool queries FortiManager for the fleet's running versions.
+
+### Running the workflow
+
+```
+/analyze-psirt
+```
+
+Claude will:
+
+1. Ask you to paste the advisory email or provide the `.eml` path.
+2. Extract structured fields from the advisory (advisory ID, CVE IDs, affected version ranges, workaround text, exploitation language).
+3. Call `parse_advisory` to validate the extraction — if anything is missing or ambiguous, Claude will ask you before proceeding.
+4. Call `assess_fleet_exposure`, which queries all ADOMs in FortiManager, compares each device's running version against the affected ranges, checks any workarounds against live config, and cross-references the CISA KEV catalog.
+5. Save an HTML report to `output/PSIRT/<advisory-id>/<advisory-id>.html`. Attach it to your change or vulnerability management ticket.
+6. Present the summary: priority, exploitation status (including a KEV flag if the vulnerability is in the CISA Known Exploited Vulnerabilities catalog), verdict counts, and a per-device list for any non-`no_action` results.
+
+### Interpreting the output
+
+**Priority** — exploit-aware: a KEV hit or explicit exploitation language in the advisory forces priority to at least **High** regardless of CVSS score. Informational priority means the fleet has zero exposure to the affected ranges.
+
+**Verdicts per device:**
+
+| Verdict | Meaning |
+|---|---|
+| `no_action` | Device is not in an affected version range (or the product is not in scope) |
+| `config_change_required` | A recognized workaround exists and the device's config does not already have it applied |
+| `upgrade_required` | Device is in an affected version range; no workaround resolves the exposure |
+
+**Degraded scan** — if some ADOM queries failed, the report flags `degraded: true`. A degraded result means some devices were not checked — never treat it as "fleet is clean." Investigate the FortiManager connectivity issue and re-run.
+
+**Stale workaround detection** — the tool checks only workaround patterns it recognizes (e.g., restricting HTTP/HTTPS admin-access interfaces). Unrecognized workaround text returns `manual_verification_required` — the tool will not guess. Treat `manual_verification_required` as equivalent to `config_change_required` until you verify manually.
+
+**No auto-remediation.** The output is an HTML report and a list of devices to act on. No changes are made to any device or FortiManager.
+
+After reviewing the results with the appropriate team, run `/record-decision` for each device with a non-`no_action` verdict to log the disposition.
+
+---
+
 ## 3. Data flow
 
 This diagram shows how a request moves through the system from intake to decision.
@@ -244,8 +326,8 @@ Central MCP Server (fwanalyst_server, port 8000)
 **Causes and fixes:**
 
 1. Central server is down or the unified service crashed. SSH to the central server and check: `systemctl status 4tanalyst`. Restart if needed.
-2. A `401 Unauthorized` means the bearer token in your `mcp_servers.json` is missing, wrong, or revoked — ask the team lead for a new token. If you previously had access to an ADOM and now get `{"error": "ADOM '...' is not in your allowed list."}` from a tool, your token's ADOM scope needs updating — contact the admin (see `SECURITY.md` §"Issuing engineer tokens").
-3. Your laptop's `mcp_servers.json` has the wrong hostname or port. Re-read the file and confirm it matches what the team distributed.
+2. A `401 Unauthorized` means the bearer token in your `.mcp.json` is missing, wrong, or revoked — ask the team lead for a new token. If you previously had access to an ADOM and now get `{"error": "ADOM '...' is not in your allowed list."}` from a tool, your token's ADOM scope needs updating — contact the admin (see `SECURITY.md` §"Issuing engineer tokens").
+3. Your laptop's `.mcp.json` has the wrong hostname or port. Re-read the file and confirm it matches what the team distributed.
 4. Firewall between your laptop and the central server is blocking port 8000. Confirm you are on the correct VPN profile or network segment that allows HTTPS to the central server.
 5. TLS certificate error (self-signed cert not trusted). Ask your admin for the CA cert and add it to your system trust store, or confirm the server is using a properly signed internal cert.
 
@@ -339,3 +421,5 @@ In all cases: the engineer is accountable. Use the tool output as a research sta
 | `/generate-peer-review` | After analysis is complete — assembles sign-off document |
 | `/record-decision` | After approvals obtained — logs outcome to feedback store |
 | `/missing-info` | Request is incomplete — drafts follow-up to requester |
+| `/analyze-psirt` | Fortinet PSIRT advisory — per-device verdict + exploit-aware priority + HTML report |
+| `/analyze-hygiene` | Rule Hygiene export — per-finding CLI remediation + HTML report |
