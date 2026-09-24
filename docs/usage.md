@@ -118,6 +118,81 @@ Claude will prompt for the decision, reviewer name, and optional ticket referenc
 
 ---
 
+### `/analyze-hygiene` — Rule Hygiene fix assessment
+
+Turns a completed FortiManager Rule Hygiene run into per-finding FortiGate CLI remediation and an HTML report. Run this after exporting findings from the Rule Hygiene module (JSON or CSV — either the GUI export or the scheduled-job attachment format works).
+
+**What you need to have ready:**
+- The hygiene findings — pasted JSON or CSV text, or the path to the exported file
+- The **ADOM**, **device**, and **policy package** the hygiene run was against (the export itself doesn't carry this)
+
+```
+/analyze-hygiene
+```
+
+Claude will prompt for the findings and scope, then:
+1. Parse the findings (validates structure; fails explicitly if malformed — never guesses).
+2. Re-fetch the live policy package from FortiManager and cross-reference it against the findings.
+3. For each finding, generate deterministic fix options with exact FortiGate CLI.
+4. Save an HTML report to `output/hygiene/<device>_<pkg>_<date>.html`.
+5. Present stale findings (where the policy no longer exists in the live package) before actionable fixes.
+
+**Fix options by check type:**
+
+| Check | Fix options |
+|---|---|
+| `unnamed` | Rename the rule using the team naming convention |
+| `disabled` | If tagged `[HygieneFix]` within 90 days: re-enable or add `EXEMPT` tag; if older than 90 days: delete |
+| `shadow` | Delete the shadowed rule, or merge into the shadowing rule |
+| `over_permissive` | Narrow source, destination, or service to least-privilege |
+| `redundant` | Delete the redundant rule |
+| `expired_schedule` | Update or remove the expired schedule object |
+| `unused_object` | Delete the unused address or service object |
+| `missing_log` | Add the required logging profile |
+| `any_service` | Replace `ALL` service with the specific services actually needed |
+
+**Stale findings** (policy_id not found in the live package) are listed first — they were skipped because the rule may have already been fixed or removed. Verify manually before treating as resolved.
+
+**No auto-remediation.** The output is CLI and an HTML report. No changes are made to FortiManager or any device.
+
+---
+
+### `/analyze-psirt` — Fortinet PSIRT advisory assessment
+
+Cross-references a Fortinet security advisory against the live fleet and produces a per-device verdict with an HTML report. Run this when a PSIRT advisory email arrives.
+
+**What you need to have ready:**
+- The advisory email — paste the text directly or provide a path to the `.eml` file
+
+That's it. The tool queries FortiManager for every device's running version automatically.
+
+```
+/analyze-psirt
+```
+
+Claude will prompt for the advisory email, extract the structured fields, and then:
+
+1. Validate the extraction with `parse_advisory` — asks for clarification if anything is ambiguous.
+2. Query every ADOM in FortiManager and assess each device's version against the affected ranges, checking any recognized workarounds against live config and cross-referencing the CISA KEV catalog.
+3. Save an HTML report to `output/PSIRT/<advisory-id>/<advisory-id>.html`.
+4. Present the results: priority, exploitation status, per-verdict device counts, and the list of devices requiring action.
+
+**Verdict meanings:**
+
+| Verdict | Meaning |
+|---|---|
+| `no_action` | Device is not in an affected version range |
+| `config_change_required` | Workaround exists but is not applied on this device |
+| `upgrade_required` | Device is in an affected range; no workaround resolves the exposure |
+
+**Priority is exploit-aware.** If the vulnerability appears in the CISA Known Exploited Vulnerabilities (KEV) catalog, or if the advisory's own text mentions active exploitation, priority is forced to at least **High** regardless of the CVSS score.
+
+**Degraded scan warning.** If some ADOM queries failed, the report flags `degraded: true`. Re-run after fixing the connectivity issue — a degraded scan is not a clean bill of health.
+
+**No auto-remediation.** Output is an HTML report and a per-device action list. No changes are made to any device or FortiManager.
+
+---
+
 ## Typical workflow
 
 ```
