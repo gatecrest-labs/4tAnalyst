@@ -29,7 +29,7 @@ Run locally (stdio):
   python -m fortimanager_mcp.server
 
 Run as SSE server (production):
-  mcp run fortimanager_mcp/server.py --transport sse --port 8002
+  MCP_TRANSPORT=sse FASTMCP_PORT=8002 python -m fortimanager_mcp
 """
 
 import logging

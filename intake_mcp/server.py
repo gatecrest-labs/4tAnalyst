@@ -24,7 +24,7 @@ Run locally (stdio):
   python -m intake_mcp.server
 
 Run as SSE server (production):
-  mcp run intake_mcp/server.py --transport sse --port 8004
+  MCP_TRANSPORT=sse FASTMCP_PORT=8004 python -m intake_mcp
 """
 
 import json

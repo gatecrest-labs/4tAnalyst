@@ -23,7 +23,7 @@ Run locally (stdio):
   python -m feedback_mcp.server
 
 Run as SSE server (production):
-  mcp run feedback_mcp/server.py --transport sse --port 8003
+  MCP_TRANSPORT=sse FASTMCP_PORT=8003 python -m feedback_mcp
 """
 
 import logging

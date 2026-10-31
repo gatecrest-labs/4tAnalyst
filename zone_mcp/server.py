@@ -15,7 +15,7 @@ Run locally (stdio):
   uv run python -m zone_mcp.server
 
 Run as SSE server (production):
-  uv run mcp run zone_mcp/server.py --transport sse --port 8005
+  MCP_TRANSPORT=sse FASTMCP_PORT=8005 python -m zone_mcp
 """
 
 import logging

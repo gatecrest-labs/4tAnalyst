@@ -17,7 +17,7 @@ Run locally (stdio):
   python -m standards_mcp.server
 
 Run as SSE server (for central deployment):
-  mcp run standards_mcp/server.py --transport sse --port 8000
+  MCP_TRANSPORT=sse FASTMCP_PORT=8000 python -m standards_mcp
 """
 
 import json

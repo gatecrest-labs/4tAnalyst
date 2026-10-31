@@ -139,7 +139,7 @@ The file lives at `standards_mcp/naming.local.yaml` and is gitignored — it wil
 
 For initial testing, start the server manually. Host/port are set via
 `FASTMCP_HOST`/`FASTMCP_PORT` env vars, not CLI flags — the installed
-`mcp` version's `FastMCP.run()` only accepts `transport`:
+`mcp` 2.x `MCPServer.run()` takes host/port as arguments, which our `__main__` modules read from those env vars:
 
 ```bash
 sudo -u 4tanalyst bash -c "
