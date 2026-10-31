@@ -10,7 +10,7 @@ services:
     working_dir: /opt/4tanalyst
     volumes:
       - ./:/opt/4tanalyst:cached
-    command: sh -c "uv pip install -e standards_mcp/ && uv run mcp run standards_mcp/server.py --transport sse --port 8000"
+    command: sh -c "uv pip install -e standards_mcp/ && MCP_TRANSPORT=sse FASTMCP_PORT=8000 uv run python -m standards_mcp"
     ports:
       - 8000:8000
 
@@ -20,7 +20,7 @@ services:
     working_dir: /opt/4tanalyst
     volumes:
       - ./:/opt/4tanalyst:cached
-    command: sh -c "uv pip install -e mcp_common/ -e fortimanager_mcp/ && uv run mcp run fortimanager_mcp/server.py --transport sse --port 8001"
+    command: sh -c "uv pip install -e mcp_common/ -e fortimanager_mcp/ && MCP_TRANSPORT=sse FASTMCP_PORT=8001 uv run python -m fortimanager_mcp"
     ports:
       - 8001:8001
 

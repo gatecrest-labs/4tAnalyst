@@ -84,7 +84,7 @@ python -m fwanalyst_server.admin create-user <username> --role admin|viewer
 
 ### fwanalyst_server/
 
-- **`server.py`** — single FastMCP aggregating all 31 per-package tools (via `add_tool`) + `plan_change` (32 total; `tests/test_fwanalyst_auth.py` asserts the count — update it when adding tools).
+- **`server.py`** — single MCPServer aggregating all 45 per-package tools (via `add_tool`) + `plan_change` and `plan_fqdn_change` (47 total; `tests/test_fwanalyst_auth.py` asserts the count — update it when adding tools).
 - **`context.py`** — Thin shared module: exports `allowed_adoms_var: ContextVar[set[str]]`. Lives here (not in `auth.py`) so `fortimanager_mcp` can import it without a circular dependency.
 - **`auth.py`** — `require_bearer(app, token, creds=None)` ASGI wrapper; constant-time compare; fail-closed (`AuthConfigError` on empty token). When `creds` is provided, resolves the bearer token to an allowed ADOM set via `_resolve_allowed_adoms()` and injects it into `allowed_adoms_var` for the duration of each request. Named per-engineer tokens from `server.tokens` are accepted in addition to the primary admin token.
 - **`rate_limit.py`** — `rate_limit(app, max_requests, window_seconds)` ASGI wrapper; per-`Mcp-Session-Id` sliding-window call budget, `429` past the limit (defaults 300 req/60s, `FW_ANALYST_RATE_LIMIT_MAX`/`FW_ANALYST_RATE_LIMIT_WINDOW_SECONDS`, `MAX=0` disables). Applied inside `require_bearer` in `__main__.py` so unauthenticated requests never consume budget.
@@ -96,7 +96,7 @@ python -m fwanalyst_server.admin create-user <username> --role admin|viewer
 
 ### standards_mcp/
 
-**`server.py`** — FastMCP server exposing 5 tools. Loads `policy_db.json`, `naming.yaml`, and `review_requirements.yaml` at startup (cached). Tools:
+**`server.py`** — MCP server exposing 5 tools. Loads `policy_db.json`, `naming.yaml`, and `review_requirements.yaml` at startup (cached). Tools:
 - `get_zone_matrix()` — full zone-pair policy table (static)
 - `check_traffic(src_zone, dst_zone, service)` — ALLOWED / BLOCKED / UNKNOWN (static data — do not use for verdicts)
 - `get_naming_convention(object_type, platform)` — FortiGate naming patterns
@@ -119,7 +119,7 @@ python -m fwanalyst_server.admin create-user <username> --role admin|viewer
 
 **`query.py`** — high-level query helpers consumed by `server.py`. `search_policies` returns a structured dict `{policies, packages_searched, packages_failed, degraded}` — when `degraded` is True an empty match list must NOT be read as "no rule exists".
 
-**`server.py`** — FastMCP exposing 19 read-only tools. All tools that accept an `adom` parameter call `_require_adom(adom)` as their first line — hard-erroring if the caller's token is not allowed for that ADOM. `get_adoms()` silently filters the returned list to the caller's allowed set. In stdio/dev mode (no HTTP middleware, `allowed_adoms_var` unset) all tools default to full access.
+**`server.py`** — MCPServer exposing 19 read-only tools. All tools that accept an `adom` parameter call `_require_adom(adom)` as their first line — hard-erroring if the caller's token is not allowed for that ADOM. `get_adoms()` silently filters the returned list to the caller's allowed set. In stdio/dev mode (no HTTP middleware, `allowed_adoms_var` unset) all tools default to full access.
 - `get_system_status`, `get_ha_status` — FortiManager version/hostname/serial and HA cluster status (no ADOM param — not guarded)
 - `get_adoms`, `get_devices`, `search_devices` — discovery (search_devices filters get_devices client-side by name/platform/OS/connection status)
 - `search_policies(adom, device, src_ip, dst_ip, service)` — structured set-semantics policy search
@@ -145,7 +145,7 @@ FortiManager version flag in `credentials.yaml` controls `version: "7.4"` vs `"7
 - `GET  /external/api/zone/zones` — zone catalogue
 - `GET  /external/api/zone/policies` — policy table
 
-**`server.py`** — FastMCP exposing 5 tools:
+**`server.py`** — MCPServer exposing 5 tools:
 - `query_zone_policy(src, dst, service)` — bulk IP/CIDR verdict (supports comma/newline-separated lists)
 - `get_zones()` — full zone catalogue (33 zones, live)
 - `get_policies()` — raw policy table (161 policies, live)
@@ -160,7 +160,7 @@ FortiManager version flag in `credentials.yaml` controls `version: "7.4"` vs `"7
 - **`psirt/workaround_checks.py`** — registry mapping recognized workaround text patterns to FortiManager config checks (starts with one: HTTP/HTTPS admin-access interface restriction). Unrecognized workaround text returns `manual_verification_required`, never a guessed status.
 - **`psirt/enrich.py`** — best-effort fortiguard.com advisory page fetch + CISA KEV catalog cross-check; never raises, sets `enrichment_degraded` on failure.
 - **`psirt/engine.py`** — `assess(advisory, fmg_client, http_client, kev_url) -> PsirtAssessment`, the single entry point.
-- **`psirt_mcp/server.py`** — FastMCP wrapper exposing `parse_advisory` (validates the calling model's structured extraction of a PSIRT email — this package does not call an LLM itself), `assess_fleet_exposure`, `render_psirt_report`. Registered into `fwanalyst_server`.
+- **`psirt_mcp/server.py`** — MCPServer wrapper exposing `parse_advisory` (validates the calling model's structured extraction of a PSIRT email — this package does not call an LLM itself), `assess_fleet_exposure`, `render_psirt_report`. Registered into `fwanalyst_server`.
 
 No auto-remediation: output is HTML analysis only, unlike the firewall-change planner. See `docs/superpowers/specs/2026-08-23-psirt-advisory-assessment-design.md` for the full design.
 
@@ -172,7 +172,7 @@ No auto-remediation: output is HTML analysis only, unlike the firewall-change pl
 - **`hygiene/fix_logic.py`** — one `_fix_<check>()` deterministic fix generator per Rule Hygiene check (9 total), dispatched via `_FIX_FNS`, each producing `list[FixOption]` against the raw FortiManager policy dict.
 - **`hygiene/engine.py`** — `assess(findings, live_policies_by_pkg, device, adom, pkg, now=None) -> HygieneResult`, the single entry point.
 - **`hygiene/report.py`** — stdlib-only HTML report renderer, matching `scripts/render_report.py`'s zero-dependency convention.
-- **`hygiene_mcp/server.py`** — FastMCP wrapper exposing `parse_hygiene_findings`, `assess_hygiene_fixes`, `render_hygiene_report`. Registered into `fwanalyst_server`.
+- **`hygiene_mcp/server.py`** — MCPServer wrapper exposing `parse_hygiene_findings`, `assess_hygiene_fixes`, `render_hygiene_report`. Registered into `fwanalyst_server`.
 
 No auto-remediation: output is per-finding FortiGate CLI plus an HTML report, never applied to FortiManager or a device.
 
@@ -180,7 +180,7 @@ No auto-remediation: output is per-finding FortiGate CLI plus an HTML report, ne
 
 **`store.py`** — SQLite backend (WAL mode). Schema: `feedback` table (indexed on src_zone/dst_zone/service for similarity queries) + append-only `audit_log`. Phase 4 migration path: replace `_connect()` for Postgres; all other code is DB-API 2.0 agnostic.
 
-**`server.py`** — FastMCP exposing 5 tools:
+**`server.py`** — MCPServer exposing 5 tools:
 - `record_feedback(...)` — save decision (ACCEPTED/MODIFIED/REJECTED) after each ticket
 - `get_similar_cases(src_zone, dst_zone, service)` — precedent lookup; call before generating recommendations
 - `get_feedback_summary(days)` — aggregate stats (acceptance rate, top zone pairs, etc.)
@@ -189,7 +189,7 @@ No auto-remediation: output is per-finding FortiGate CLI plus an HTML report, ne
 
 ### intake_mcp/
 
-**`server.py`** — FastMCP exposing 3 tools:
+**`server.py`** — MCPServer exposing 3 tools:
 - `parse_spreadsheet(file_path)` — parse .xlsx firewall request forms
 - `parse_manual_entry(json_dict)` — normalise conversationally entered requests
 - `describe_template()` — return expected spreadsheet structure

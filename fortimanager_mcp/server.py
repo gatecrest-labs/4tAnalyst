@@ -29,7 +29,7 @@ Run locally (stdio):
   python -m fortimanager_mcp.server
 
 Run as SSE server (production):
-  mcp run fortimanager_mcp/server.py --transport sse --port 8002
+  MCP_TRANSPORT=sse FASTMCP_PORT=8002 python -m fortimanager_mcp
 """
 
 import logging
@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
 from fortimanager_mcp import client as _client_module
@@ -154,7 +154,7 @@ def _validate_or_error(
 # MCP server
 # ---------------------------------------------------------------------------
 
-mcp = FastMCP(
+mcp = MCPServer(
     name="fortimanager",
     instructions=(
         "FortiManager read-only query server (7.4.x). "
@@ -173,7 +173,7 @@ mcp = FastMCP(
 # Tool: get_system_status
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def get_system_status() -> dict[str, Any]:
     """
     Return FortiManager system status and version information.
@@ -194,7 +194,7 @@ def get_system_status() -> dict[str, Any]:
 # Tool: get_ha_status
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def get_ha_status() -> dict[str, Any]:
     """
     Return FortiManager High Availability (HA) cluster status.
@@ -214,7 +214,7 @@ def get_ha_status() -> dict[str, Any]:
 # Tool: get_adoms
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def get_adoms() -> list[dict[str, Any]]:
     """
     List administrative domains (ADOMs) managed by FortiManager.
@@ -242,7 +242,7 @@ def get_adoms() -> list[dict[str, Any]]:
 # Tool: get_devices
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def get_devices(adom: str) -> list[dict[str, Any]]:
     """
     List FortiGate devices managed within an ADOM.
@@ -270,7 +270,7 @@ def get_devices(adom: str) -> list[dict[str, Any]]:
 # Tool: search_devices
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def search_devices(
     adom: str,
     name_filter: str = "",
@@ -309,7 +309,7 @@ def search_devices(
 # Tool: search_policies
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def search_policies(
     adom: str,
     device: str,
@@ -357,7 +357,7 @@ def search_policies(
 # Tool: get_address_object
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def get_address_object(adom: str, name_or_ip: str) -> dict[str, Any]:
     """
     Look up an address object by name or IP address.
@@ -385,7 +385,7 @@ def get_address_object(adom: str, name_or_ip: str) -> dict[str, Any]:
 # Tool: search_address_objects
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def search_address_objects(adom: str, ip: str) -> list[dict[str, Any]]:
     """
     Find all address objects that contain the given IP address or CIDR.
@@ -416,7 +416,7 @@ def search_address_objects(adom: str, ip: str) -> list[dict[str, Any]]:
 # Tool: search_fqdn_rules
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def search_fqdn_rules(adom: str, device: str, fqdns: list[str]) -> dict:
     """
     Find FortiManager policies that cover the requested FQDN/wildcard strings.
@@ -445,7 +445,7 @@ def search_fqdn_rules(adom: str, device: str, fqdns: list[str]) -> dict:
 # Tool: get_service_object
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def get_service_object(adom: str, name_or_port: str) -> dict[str, Any]:
     """
     Look up a service object by name or port number.
@@ -473,7 +473,7 @@ def get_service_object(adom: str, name_or_port: str) -> dict[str, Any]:
 # Tool: get_policy
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def get_policy(adom: str, pkg: str, policy_id: int) -> dict[str, Any]:
     """
     Return full details for a specific firewall policy.
@@ -502,7 +502,7 @@ def get_policy(adom: str, pkg: str, policy_id: int) -> dict[str, Any]:
 # Tool: get_interface_map
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def get_interface_map(adom: str, device: str) -> dict[str, Any]:
     """
     Return interface-to-zone assignments for a FortiGate device.
@@ -531,7 +531,7 @@ def get_interface_map(adom: str, device: str) -> dict[str, Any]:
 # Tool: get_device_interface_config
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def get_device_interface_config(
     adom: str,
     device: str,
@@ -570,7 +570,7 @@ def get_device_interface_config(
 # Tool: get_routing_table
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def get_routing_table(adom: str, device: str) -> list[dict[str, Any]]:
     """
     Return the static routing table configured on a FortiGate device.
@@ -600,7 +600,7 @@ def get_routing_table(adom: str, device: str) -> list[dict[str, Any]]:
 # Tool: get_central_snat
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def get_central_snat(adom: str, pkg: str) -> list[dict] | dict:
     """List all Central SNAT rules for a policy package.
 
@@ -627,7 +627,7 @@ def get_central_snat(adom: str, pkg: str) -> list[dict] | dict:
 # Tool: get_central_dnat
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def get_central_dnat(adom: str, pkg: str) -> list[dict] | dict:
     """List all Central DNAT rules (VIPs) for a policy package.
 
@@ -654,7 +654,7 @@ def get_central_dnat(adom: str, pkg: str) -> list[dict] | dict:
 # Tool: list_device_vdoms
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def list_device_vdoms(adom: str, device: str) -> list[dict[str, Any]]:
     """
     List VDOMs (virtual domains) configured on a FortiGate device.
@@ -684,7 +684,7 @@ def list_device_vdoms(adom: str, device: str) -> list[dict[str, Any]]:
 # Tool: get_device_client_location
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def get_device_client_location(
     adom: str,
     device: str,
@@ -726,7 +726,7 @@ def get_device_client_location(
 # Tool: get_device_sdwan
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def get_device_sdwan(adom: str, device: str, vdom: str = "root") -> dict[str, Any]:
     """
     Return a FortiGate's device-DB SD-WAN configuration: zones, members,
@@ -762,7 +762,7 @@ def get_device_sdwan(adom: str, device: str, vdom: str = "root") -> dict[str, An
 # Tool: get_device_sdwan_monitor
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def get_device_sdwan_monitor(adom: str, device: str) -> dict[str, Any]:
     """
     Return LIVE SD-WAN runtime status for a device: per-member link state
