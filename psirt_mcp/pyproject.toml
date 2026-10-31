@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "PSIRT advisory assessment MCP server — parses Fortinet PSIRT emails and assesses fleet exposure"
 requires-python = ">=3.11"
 dependencies = [
-    "mcp[cli]>=1.30.0,<2.0.0",
+    "mcp[cli]>=2.3.0,<3.0.0",
     "pyyaml>=6.0",
     "httpx>=0.28.1",
 ]

@@ -31,7 +31,7 @@ import json
 import logging
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
 from intake_mcp.fqdn_parser import parse_fqdn_rows, parse_fqdn_xlsx
@@ -39,7 +39,7 @@ from intake_mcp.parser import parse_manual_entry, parse_spreadsheet
 
 logger = logging.getLogger(__name__)
 
-mcp = FastMCP(
+mcp = MCPServer(
     name="intake",
     instructions=(
         "Firewall request intake server. "
@@ -57,7 +57,7 @@ mcp = FastMCP(
 # Tool: parse_spreadsheet
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def parse_spreadsheet_file(file_path: str) -> dict[str, Any]:
     """
     Parse a firewall request spreadsheet (.xlsx).
@@ -123,7 +123,7 @@ def parse_spreadsheet_file(file_path: str) -> dict[str, Any]:
 # Tool: parse_manual_entry
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def parse_manual_entry_tool(fields_json: str) -> dict[str, Any]:
     """
     Accept a firewall request entered manually (not from a spreadsheet).
@@ -199,7 +199,7 @@ def parse_manual_entry_tool(fields_json: str) -> dict[str, Any]:
 # Tool: describe_template
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def describe_template() -> dict[str, Any]:
     """
     Return the expected structure of the firewall request spreadsheet
@@ -301,7 +301,7 @@ def describe_template() -> dict[str, Any]:
 # Tool: parse_fqdn_allowlist
 # ---------------------------------------------------------------------------
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def parse_fqdn_allowlist(
     src_ip: str,
     ticket_id: str,
