@@ -3,7 +3,7 @@
     "4tanalyst": {
       "type": "http",
       "url": "https://<central-server>/mcp",
-      "headers": { "Authorization": "Bearer <your-token-here>" }
+      "headers": { "Authorization": "Bearer ${FW_ANALYST_CLIENT_TOKEN}" }
     }
   }
 }

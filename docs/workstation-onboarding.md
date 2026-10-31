@@ -11,8 +11,10 @@ A sparse checkout pulls down only the slash commands and the local report-render
 ```bash
 git clone --filter=blob:none --sparse <repo-url> 4tAnalyst-workstation
 cd 4tAnalyst-workstation
-git sparse-checkout set --no-cone .claude/ scripts/ .mcp.json.example
+git sparse-checkout set .claude scripts
 ```
+
+Root-level files (including `.mcp.json.example`) are always included automatically in cone mode.
 
 Your team access to this repo is **read-only**. If you spot a bug in a skill or a naming rule it enforces, report it to the FW engineering team (see `CONTRIBUTING.md`) rather than editing your local copy.
 
@@ -54,7 +56,7 @@ Then edit `.mcp.json` and replace the one remaining placeholder:
   "mcpServers": {
     "4tanalyst": {
       "type": "http",
-      "url": "https://<central-server>:8000/mcp",
+      "url": "https://<central-server>/mcp",
       "headers": {
         "Authorization": "Bearer ${FW_ANALYST_CLIENT_TOKEN}"
       }
@@ -64,6 +66,8 @@ Then edit `.mcp.json` and replace the one remaining placeholder:
 ```
 
 Replace `<central-server>` with the hostname the admin provides. Use `https://`, not `http://` — plain HTTP is not acceptable for this data in a regulated environment (NERC CIP, HIPAA, PCI-DSS, etc.).
+
+> **Port note:** In production the server sits behind nginx on port 443 — no port number in the URL. If the admin tells you the server is not yet behind a reverse proxy (e.g., during a pilot using direct uvicorn TLS on port 443, or temporarily on port 8000 for local testing), they will give you the full URL including the port. Use exactly what they provide.
 
 Do **not** paste the token itself into `.mcp.json`. Claude Code expands `${VAR}` references in `.mcp.json` headers at connect time, so set `FW_ANALYST_CLIENT_TOKEN` as an environment variable instead — in your shell profile (`~/.zshrc`, `~/.bashrc`) or, better, your OS keychain if your shell setup supports sourcing secrets from it:
 
@@ -96,18 +100,29 @@ To have your Claude Code sessions report token counts and estimated cost to the 
       "matcher": "",
       "hooks": [{
         "type": "command",
-        "command": "curl -sf -X POST https://<server>:8000/api/usage -H 'Authorization: Bearer <your-mcp-token>' -H 'Content-Type: application/json' -d '{\"session_id\":\"'$CLAUDE_SESSION_ID'\",\"input_tokens\":'$CLAUDE_INPUT_TOKENS',\"output_tokens\":'$CLAUDE_OUTPUT_TOKENS',\"model\":\"'$CLAUDE_MODEL'\"}' || true"
+        "command": "curl -sf -X POST https://<server>/api/usage -H \"Authorization: Bearer $FW_ANALYST_CLIENT_TOKEN\" -H 'Content-Type: application/json' -d '{\"session_id\":\"'$CLAUDE_SESSION_ID'\",\"input_tokens\":'$CLAUDE_INPUT_TOKENS',\"output_tokens\":'$CLAUDE_OUTPUT_TOKENS',\"model\":\"'$CLAUDE_MODEL'\"}' || true"
       }]
     }]
   }
 }
 ```
 
-Replace `<server>` with the 4tAnalyst server address and `<your-mcp-token>` with your personal MCP bearer token. The `|| true` ensures a server outage never blocks Claude Code from completing a session.
+Replace `<server>` with the 4tAnalyst server address. The hook reads your token from `$FW_ANALYST_CLIENT_TOKEN` automatically — no separate placeholder to fill in. The `|| true` ensures a server outage never blocks Claude Code from completing a session.
 
 ## What's next
 
-Once connected, `docs/engineer-workflow.md` §2 walks through working an actual firewall request end-to-end with the six slash commands (`/analyze-request`, `/check-policy`, `/validate-rule`, `/generate-peer-review`, `/record-decision`, `/missing-info`).
+Once connected, `docs/engineer-workflow.md` §2 walks through working an actual firewall request end-to-end with the slash commands:
+
+| Command | What it does |
+|---|---|
+| `/analyze-request` | Full request analysis — zone verdict, existing rules, standards, approval chain |
+| `/check-policy` | Quick zone policy verdict for a src→dst flow |
+| `/missing-info` | Triage an incomplete request; drafts follow-up to the submitter |
+| `/validate-rule` | Pre-submission naming and logging check |
+| `/generate-peer-review` | Assembles the peer review package for second-engineer sign-off |
+| `/record-decision` | Logs the approved/rejected/deferred outcome to the audit store |
+| `/analyze-psirt` | Assess a Fortinet PSIRT advisory against the live fleet — per-device verdict + HTML report |
+| `/analyze-hygiene` | Turn a Rule Hygiene findings export into per-finding FortiGate CLI remediation + HTML report |
 
 ---
 

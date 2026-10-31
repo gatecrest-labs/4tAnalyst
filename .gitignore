@@ -10,6 +10,9 @@ build/
 .claude/settings.local.json
 # Project-level Claude Code permissions (machine-specific paths, not portable)
 .claude/settings.json
+# Engineer MCP config — contains token references, never commit
+.mcp.json
+.claude/mcp_servers.json
 # Runtime user database — contains password hashes, never commit
 data/users.json
 # Runtime analytics DB — generated locally, never commit
