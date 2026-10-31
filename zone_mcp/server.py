@@ -18,6 +18,7 @@ Run as SSE server (production):
   MCP_TRANSPORT=sse FASTMCP_PORT=8005 python -m zone_mcp
 """
 
+import functools
 import logging
 import os
 from functools import lru_cache
@@ -28,7 +29,8 @@ import yaml
 from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
-from zone_mcp.client import ZonePolicyClient
+from mcp_common.errors import safe_error
+from zone_mcp.client import ZonePolicyClient, ZonePolicyError
 
 logger = logging.getLogger(__name__)
 
@@ -105,16 +107,40 @@ mcp = MCPServer(
 )
 
 
+def _structured_errors(fn):
+    """Return failures as {"error", "error_code", "error_source"} instead of raising.
+
+    mcp 2.x reduces an uncaught tool exception to a bare "Error executing
+    tool X" for the caller, hiding why (e.g. 4THealth unreachable or its
+    External API disabled). Surfacing a sanitized message keeps parity with
+    the fortimanager_mcp tools and plan_change.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        try:
+            return fn(*args, **kwargs)
+        except Exception as e:  # noqa: BLE001 - every failure becomes a structured error
+            logger.exception("%s failed", fn.__name__)
+            message, code = safe_error(e)
+            if isinstance(e, ZonePolicyError):
+                code = "upstream_error"
+            return {"error": message, "error_code": code, "error_source": "4thealth"}
+
+    return wrapper
+
+
 # ---------------------------------------------------------------------------
 # Tool: query_zone_policy
 # ---------------------------------------------------------------------------
 
 @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
+@_structured_errors
 def query_zone_policy(
     src: str,
     dst: str,
     service: str = "",
-) -> list[dict[str, Any]]:
+) -> list[dict[str, Any]] | dict[str, Any]:
     """
     Query the 4THealth zone policy API for a src→dst traffic verdict.
 
@@ -151,6 +177,7 @@ def query_zone_policy(
 # ---------------------------------------------------------------------------
 
 @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
+@_structured_errors
 def get_zones() -> dict[str, Any]:
     """
     Return the full zone catalogue from the 4THealth zone policy database.
@@ -175,7 +202,8 @@ def get_zones() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
-def get_policies() -> list[dict[str, Any]]:
+@_structured_errors
+def get_policies() -> list[dict[str, Any]] | dict[str, Any]:
     """
     Return the complete zone-pair policy table from 4THealth.
 
@@ -200,6 +228,7 @@ def get_policies() -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
+@_structured_errors
 def find_zone_for_ip(ip: str) -> dict[str, Any]:
     """
     Resolve an IP address or CIDR to the zone(s) it belongs to.
@@ -233,6 +262,7 @@ def find_zone_for_ip(ip: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
+@_structured_errors
 def check_ip_traffic(
     src_ip: str,
     dst_ip: str,
