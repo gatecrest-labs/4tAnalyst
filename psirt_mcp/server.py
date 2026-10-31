@@ -24,12 +24,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from psirt.engine import assess
 from psirt.models import Advisory, AffectedRange
 
-mcp = FastMCP(name="psirt")
+mcp = MCPServer(name="psirt")
 
 _CVE_RE = re.compile(r"^CVE-\d{4}-\d{4,}$")
 _REPO_ROOT = Path(__file__).parent.parent

@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
 from fortimanager_mcp.client import FortiManagerAPIError, FortiManagerClient
@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 _REPO_ROOT = Path(__file__).parent.parent
 _DEFAULT_CREDS = _REPO_ROOT / "credentials.yaml"
 
-mcp = FastMCP(
+mcp = MCPServer(
     name="hygiene",
     instructions=(
         "Rule Hygiene fix assessment. Call parse_hygiene_findings on a "
@@ -55,7 +55,7 @@ mcp = FastMCP(
 )
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def parse_hygiene_findings(
     text: str = "", file_content: str = "", file_type: str = "json"
 ) -> dict[str, Any]:
@@ -219,7 +219,7 @@ def _finding_kwargs(d: dict) -> dict:
     }
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def assess_hygiene_fixes(
     adom: str, device: str, pkg: str, findings: list[dict]
 ) -> dict[str, Any]:
@@ -297,7 +297,7 @@ def assess_hygiene_fixes(
     return payload
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True))
+@mcp.tool(annotations=ToolAnnotations(read_only_hint=True))
 def render_hygiene_report(assessment: dict[str, Any]) -> dict[str, Any]:
     """
     Re-render the HTML report from a previously computed assessment dict

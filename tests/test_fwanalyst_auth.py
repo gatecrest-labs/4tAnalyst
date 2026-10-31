@@ -325,29 +325,29 @@ def test_tool_wrapper_preserves_identity_and_signature():
 
 
 def test_tool_schemas_unchanged_by_logging_wrapper():
-    """FastMCP must derive identical input schemas from wrapped and raw fns."""
-    from mcp.server.fastmcp import FastMCP
+    """MCPServer must derive identical input schemas from wrapped and raw fns."""
+    from mcp.server.mcpserver import MCPServer
 
     from fortimanager_mcp import server as fmg
     from fwanalyst_server.server import _logged
     from fwanalyst_server.server import mcp as unified
     from zone_mcp import server as zone
 
-    raw = FastMCP(name="schema-baseline")
+    raw = MCPServer(name="schema-baseline")
     for fn in (fmg.search_policies, zone.check_ip_traffic, fmg.get_policy):
         raw.add_tool(fn)
 
-    baseline = {t.name: t.inputSchema for t in asyncio.run(raw.list_tools())}
-    live = {t.name: t.inputSchema for t in asyncio.run(unified.list_tools())}
+    baseline = {t.name: t.input_schema for t in asyncio.run(raw.list_tools())}
+    live = {t.name: t.input_schema for t in asyncio.run(unified.list_tools())}
     for name, schema in baseline.items():
         assert live[name] == schema, f"{name} schema drifted"
 
     # plan_change too — it lives in a `from __future__ import annotations`
     # module, so its annotations are strings and must still resolve.
-    plan_raw = FastMCP(name="schema-baseline-plan")
+    plan_raw = MCPServer(name="schema-baseline-plan")
     from fwanalyst_server.server import plan_change
     plan_raw.add_tool(plan_change)
-    plan_baseline = {t.name: t.inputSchema for t in asyncio.run(plan_raw.list_tools())}
+    plan_baseline = {t.name: t.input_schema for t in asyncio.run(plan_raw.list_tools())}
     assert live["plan_change"] == plan_baseline["plan_change"]
 
     # sanity: the wrapper is actually in play

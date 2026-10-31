@@ -245,12 +245,10 @@ def main() -> None:
 
     host = os.getenv("FASTMCP_HOST", "0.0.0.0")
     port = int(os.getenv("FASTMCP_PORT", "8000"))
-    mcp.settings.host = host
-    mcp.settings.port = port
-
     allowed_hosts = _allowed_hosts()
-    if allowed_hosts:
-        mcp.settings.transport_security = TransportSecuritySettings(allowed_hosts=allowed_hosts)
+    transport_security = (
+        TransportSecuritySettings(allowed_hosts=allowed_hosts) if allowed_hosts else None
+    )
     # Else: keep the SDK default (enable_dns_rebinding_protection=True,
     # allowed_hosts restricted to localhost/127.0.0.1/[::1]) — fail-closed
     # rather than silently accepting any Host header.
@@ -270,7 +268,7 @@ def main() -> None:
     token_registry.load(creds)
 
     # ---------- MCP ASGI stack ----------
-    mcp_app = mcp.streamable_http_app()
+    mcp_app = mcp.streamable_http_app(host=host, transport_security=transport_security)
 
     from fwanalyst_server.usage_middleware import UsageMiddleware
     mcp_app = UsageMiddleware(mcp_app, analytics_db)

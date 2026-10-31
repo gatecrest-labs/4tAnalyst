@@ -2,7 +2,7 @@
 Unified 4tAnalyst MCP server.
 
 Aggregates every read-only tool from the five per-domain packages onto one
-FastMCP instance and adds plan_change — the deterministic change planner.
+MCPServer instance and adds plan_change — the deterministic change planner.
 The per-package servers remain runnable individually for stdio development;
 this is the production entry point (see __main__.py for transport/auth).
 """
@@ -13,7 +13,7 @@ import functools
 import logging
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 from mcp.types import ToolAnnotations
 
 from fwanalyst_server.context import token_label_var
@@ -30,7 +30,7 @@ def _logged(fn):
 
     Logs the tool name and the caller's token label only — never arguments
     (they carry internal IPs) and never the token itself. functools.wraps keeps
-    __name__/__doc__/__wrapped__ intact so FastMCP's schema generation
+    __name__/__doc__/__wrapped__ intact so MCPServer's schema generation
     (inspect.signature follows __wrapped__) sees the original function.
     """
     @functools.wraps(fn)
@@ -41,7 +41,7 @@ def _logged(fn):
     return wrapper
 
 
-mcp = FastMCP(
+mcp = MCPServer(
     name="fw-analyst",
     instructions=(
         "4tAnalyst unified server. For firewall change requests, prefer the "
@@ -133,7 +133,7 @@ def plan_change(
     return payload
 
 
-mcp.add_tool(_logged(plan_change), annotations=ToolAnnotations(readOnlyHint=True))
+mcp.add_tool(_logged(plan_change), annotations=ToolAnnotations(read_only_hint=True))
 
 
 # ---------------------------------------------------------------------------
@@ -200,7 +200,7 @@ def plan_fqdn_change(
         return {"error": str(exc)}
 
 
-mcp.add_tool(_logged(plan_fqdn_change), annotations=ToolAnnotations(readOnlyHint=True))
+mcp.add_tool(_logged(plan_fqdn_change), annotations=ToolAnnotations(read_only_hint=True))
 
 
 # ---------------------------------------------------------------------------
@@ -211,8 +211,8 @@ mcp.add_tool(_logged(plan_fqdn_change), annotations=ToolAnnotations(readOnlyHint
 # here is read-only. Mirrors the annotations on the per-package servers, which
 # add_tool does not carry over.
 _ANNOTATIONS = {
-    "record_feedback": ToolAnnotations(readOnlyHint=False, destructiveHint=False),
-    "flag_for_review": ToolAnnotations(readOnlyHint=False, destructiveHint=False),
+    "record_feedback": ToolAnnotations(read_only_hint=False, destructive_hint=False),
+    "flag_for_review": ToolAnnotations(read_only_hint=False, destructive_hint=False),
 }
 
 
@@ -280,7 +280,7 @@ def _register_existing_tools() -> None:
         hygiene.render_hygiene_report,
     ):
         mcp.add_tool(_logged(fn), annotations=_ANNOTATIONS.get(
-            fn.__name__, ToolAnnotations(readOnlyHint=True)))
+            fn.__name__, ToolAnnotations(read_only_hint=True)))
 
 
 _register_existing_tools()
