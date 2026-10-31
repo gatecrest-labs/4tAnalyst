@@ -4,6 +4,33 @@ All notable changes to this project are documented here.
 
 ---
 
+## [Unreleased] — 2026-10-31
+
+### Changed
+
+#### Migrated to `mcp` 2.x (`FastMCP` → `MCPServer`) — PRs #85, #86
+
+All eight servers now run on `mcp[cli]>=2.3.0,<3.0.0`. mcp 2.x removes `mcp.server.fastmcp`, so this was a code migration, not just a version bump.
+
+- **Rename** — `from mcp.server.fastmcp import FastMCP` → `from mcp.server.mcpserver import MCPServer` in every `server.py` and in the tests.
+- **Types** — `ToolAnnotations` fields are snake_case (`readOnlyHint` → `read_only_hint`, `destructiveHint` → `destructive_hint`); tests read `tool.input_schema`. The wire format is unchanged (clients still see `readOnlyHint`).
+- **Transport settings** — `mcp.settings.host`/`.port`/`.transport_security` no longer exist. The per-package `__main__.py` modules (`feedback`, `standards`, `zone`, `intake`, `fortimanager`) pass `host`/`port` to `mcp.run()`; `fwanalyst_server/__main__.py` passes `host` and `transport_security` to `streamable_http_app()`. `FASTMCP_HOST`/`FASTMCP_PORT`/`MCP_TRANSPORT` are still read by our own code, so deployments need no change. The DNS-rebinding allowlist (`FW_ANALYST_ALLOWED_HOSTS` / `server.allowed_hosts`) behaves as before.
+- **`constraints.txt`** — regenerated from the package `pyproject.toml` files (`uv pip compile … --python-version 3.11`); now pins `mcp 2.3.0` and `httpx2` and drops `httpx-sse`. `pip-audit` clean.
+- **Docs/examples** — removed the obsolete `mcp run … --transport sse --port N` invocations (the v2 CLI dropped those flags) from the `server.py` docstrings and `docker-compose.example.yml` in favour of `MCP_TRANSPORT=sse FASTMCP_PORT=N python -m <pkg>`; CLAUDE.md and `docs/installation.md` updated; corrected the stale tool count in CLAUDE.md (47).
+- **Verified** — 599 tests passing and `pip-audit` clean on Python 3.11; unified server exercised over real streamable-HTTP in a container against a lab FortiManager 7.6.8 and 4THealth (smoke check, 47 tools, ADOM guard for restricted tokens, `get_system_status`, `search_policies`, `get_zones`, `check_ip_traffic`, `plan_change`). Not exercised: `new_rule` plans / insertion / CLI generation (lab FMG has an empty package), and a real Claude Code client.
+
+#### Dependabot / dependency handling
+
+- `planner` — `httpx>=0.28.1` (PR #78).
+- Dependabot PR #84 (`mcp>=2.3.0` in `feedback_mcp` only) was stuck: `psirt_mcp`/`hygiene_mcp` still pinned `mcp<2`, so the resolver fell back to `mcp 1.29.0` and `pip-audit` failed on its CVEs. Closed in favour of first aligning every package on `mcp>=1.30.0,<2.0.0` (the CVE fix), then the 2.x migration above.
+- `constraints.txt` interim refresh: `mcp 1.30.0`, `pyjwt 2.15.1`, `urllib3 2.8.0`, `certifi 2026.10.23` (all had `pip-audit` findings).
+
+### Fixed
+
+- **`zone_mcp` tools return structured errors** — on mcp 2.x an uncaught tool exception reaches the client as a bare "Error executing tool X". `query_zone_policy`, `get_zones`, `get_policies`, `find_zone_for_ip` and `check_ip_traffic` now catch failures and return a sanitized `{error, error_code, error_source: "4thealth"}` (`upstream_error` for `ZonePolicyError`, `internal_error` otherwise; hostnames/IPs/paths scrubbed via `mcp_common.errors.safe_error`, full exception logged server-side). Same shape family as `fortimanager_mcp` and `plan_change`. The two list-returning tools now declare `list | dict`. 8 new tests in `tests/test_zone_server_errors.py`.
+
+---
+
 ## [Unreleased] — 2026-08-24
 
 ### Added
