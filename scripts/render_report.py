@@ -781,6 +781,52 @@ _PSIRT_PRIORITY_CLASSES = {
     "informational": "verdict-allowed",
 }
 
+_PSIRT_FEATURE_NAMES: dict[str, str] = {
+    "ssl_vpn":        "SSL-VPN",
+    "ipsec":          "IPsec VPN",
+    "ztna":           "ZTNA",
+    "bgp":            "BGP routing",
+    "ospf":           "OSPF routing",
+    "radius":         "RADIUS authentication",
+    "ldap":           "LDAP authentication",
+    "saml":           "SAML authentication",
+    "multicast":      "Multicast routing",
+    "sdwan":          "SD-WAN",
+    "snmp":           "SNMP",
+    "ssh":            "SSH admin access",
+    "dhcp":           "DHCP server",
+    "ipv6":           "IPv6",
+    "web_management": "Web/HTTP/HTTPS management",
+    "ntp":            "NTP",
+    "dns":            "DNS",
+    "ha":             "High Availability",
+    "fgfm":           "FortiGate-FortiManager protocol",
+    "fortiguard":     "FortiGuard services",
+    "vdom":           "VDOM (multi-VDOM mode)",
+    "captive_portal": "Captive portal",
+    "two_fa":         "Two-factor authentication",
+    "ips":            "IPS/IDPS",
+    "antivirus":      "Antivirus",
+    "webfilter":      "Web filtering",
+    "app_control":    "Application control",
+    "lldp":           "LLDP",
+    "wad":            "Web Application Daemon",
+    "arp":            "ARP",
+}
+
+
+def _psirt_feature_cell(f: dict) -> str:
+    """Return the Feature Exposure <td> for a single DeviceFinding dict."""
+    features_checked = f.get("features_checked") or []
+    if not features_checked:
+        return "<td>—</td>"
+    status = f.get("feature_status", "")
+    if status == "inactive":
+        return '<td><span class="badge feat-not-exposed">Not exposed</span></td>'
+    if status == "active":
+        return '<td><span class="badge feat-exposed">Exposed</span></td>'
+    return '<td><span class="badge feat-unknown">Unknown</span></td>'
+
 
 def render_psirt_html(
     data: dict,
@@ -805,17 +851,41 @@ def render_psirt_html(
     )
 
     finding_rows = "".join(
-        f"<tr><td><code>{esc(f.get('device',''))}</code></td>"
-        f"<td>{esc(f.get('adom',''))}</td>"
-        f"<td>{esc(f.get('product',''))}</td>"
-        f"<td>{esc(f.get('current_version',''))}</td>"
-        f"<td>{'Yes' if f.get('in_range') else 'No'}</td>"
-        f"<td>{esc(f.get('workaround_status',''))}</td>"
-        f"<td><span class=\"badge {_PSIRT_VERDICT_CLASSES.get(f.get('verdict',''), 'verdict-unknown')}\">"
-        f"{esc(_PSIRT_VERDICT_LABELS.get(f.get('verdict',''), f.get('verdict','')))}</span></td>"
-        f"<td>{esc(f.get('reason',''))}</td></tr>"
+        (
+            f"<tr><td><code>{esc(f.get('device',''))}</code></td>"
+            f"<td>{esc(f.get('adom',''))}</td>"
+            f"<td>{esc(f.get('product',''))}</td>"
+            f"<td>{esc(f.get('current_version',''))}</td>"
+            f"<td>{'Yes' if f.get('in_range') else 'No'}</td>"
+            + _psirt_feature_cell(f) +
+            f"<td>{esc(f.get('workaround_status',''))}</td>"
+            f"<td><span class=\"badge {_PSIRT_VERDICT_CLASSES.get(f.get('verdict',''), 'verdict-unknown')}\">"
+            f"{esc(_PSIRT_VERDICT_LABELS.get(f.get('verdict',''), f.get('verdict','')))}</span></td>"
+            f"<td>{esc(f.get('reason',''))}</td></tr>"
+        )
         for f in data.get("findings", [])
     )
+
+    affected_features = data.get("affected_features", [])
+    if affected_features:
+        feature_items = "".join(
+            f"<li><strong>{esc(_PSIRT_FEATURE_NAMES.get(k, k))}</strong></li>"
+            for k in affected_features
+        )
+        feature_section = (
+            '<section class="section">'
+            "<h2>Affected Services / Features</h2>"
+            "<p>The following services or features were detected in the advisory text. "
+            "For each in-range device a configuration check was run to determine "
+            "whether the feature is active — see the <strong>Features</strong> column below.</p>"
+            f"<ul>{feature_items}</ul>"
+            "<p><em>A device with <strong>all</strong> listed features confirmed inactive "
+            "is downgraded to “No Action” — the vulnerable attack surface "
+            "does not exist on that device.</em></p>"
+            "</section>"
+        )
+    else:
+        feature_section = ""
 
     out_of_scope = data.get("out_of_scope_products", [])
     warnings = data.get("warnings", [])
@@ -870,6 +940,9 @@ th{{background:#f8f8f8}}
 .verdict-allowed{{background:#d4edda;color:#155724;padding:2px 8px;border-radius:4px}}
 .verdict-blocked{{background:#f8d7da;color:#721c24;padding:2px 8px;border-radius:4px}}
 .verdict-unknown{{background:#fff3cd;color:#856404;padding:2px 8px;border-radius:4px}}
+.feat-exposed{{background:#fff3cd;color:#856404;padding:2px 8px;border-radius:4px}}
+.feat-not-exposed{{background:#d4edda;color:#155724;padding:2px 8px;border-radius:4px}}
+.feat-unknown{{background:#e2e3e5;color:#495057;padding:2px 8px;border-radius:4px}}
 .warnings{{background:#fff3cd;border-left:4px solid #ffc107;padding:0.5em 1em;margin:1em 0}}
 .section{{border:1px solid #ddd;border-radius:6px;padding:1.5em;margin:1.5em 0}}
 </style>
@@ -900,12 +973,14 @@ th{{background:#f8f8f8}}
   </table>
 </section>
 
+{feature_section}
+
 <section class="section">
   <h2>Fleet Findings</h2>
   {workaround_note}
   <table>
     <thead><tr><th>Device</th><th>ADOM</th><th>Product</th><th>Version</th>
-      <th>In Range</th><th>Workaround</th><th>Verdict</th><th>Reason</th></tr></thead>
+      <th>In Range</th><th>Features</th><th>Workaround</th><th>Verdict</th><th>Reason</th></tr></thead>
     <tbody>{finding_rows}</tbody>
   </table>
 </section>

@@ -19,6 +19,11 @@ import time
 from typing import Any
 
 from psirt.enrich import enrich_advisory
+from psirt.feature_checks import (
+    check_feature_active,
+    detect_affected_features,
+    feature_description,
+)
 from psirt.models import Advisory, DeviceFinding, PsirtAssessment
 from psirt.scoring import compute_priority
 from psirt.version_match import VersionMatchError, version_in_range
@@ -73,6 +78,7 @@ def _evaluate_device(
     firmware: str,
     fmg_client: Any,
     skip_workaround_check: bool = False,
+    affected_features: "list[str] | None" = None,
 ) -> DeviceFinding:
     if not firmware:
         return DeviceFinding(
@@ -106,6 +112,45 @@ def _evaluate_device(
             reason=f"Firmware {firmware} is outside the advisory's affected range(s).",
         )
 
+    # --- Feature exposure check ---
+    # For each service/feature named in the advisory, verify whether it is
+    # actually running on this device. All features inactive → not exposed,
+    # downgrade to no_action. Unknown results are conservative (do not downgrade).
+    features_to_check = list(affected_features) if affected_features else []
+    feature_results: dict[str, str] = {}
+    if features_to_check:
+        for fkey in features_to_check:
+            feature_results[fkey] = check_feature_active(fkey, fmg_client, adom, device_name)
+
+        all_inactive = all(v == "inactive" for v in feature_results.values())
+        if all_inactive:
+            descriptions = ", ".join(
+                feature_description(k) for k in features_to_check
+            )
+            return DeviceFinding(
+                device=device_name, adom=adom, product=product_label,
+                current_version=firmware, in_range=True,
+                # workaround_status is not_applicable here because the vulnerable
+                # feature is absent — not because the device is out-of-range.
+                # feature_status="inactive" is the authoritative field for this case.
+                workaround_status="not_applicable", verdict="no_action",
+                reason=(
+                    f"Firmware {firmware} is in the affected range, but the vulnerable "
+                    f"feature(s) are not active on this device ({descriptions}). "
+                    "No action required unless the feature is enabled in future."
+                ),
+                feature_status="inactive",
+                features_checked=features_to_check,
+            )
+
+        # Determine aggregated feature_status for the finding
+        if any(v == "active" for v in feature_results.values()):
+            agg_feature_status = "active"
+        else:
+            agg_feature_status = "unknown"
+    else:
+        agg_feature_status = "not_checked"
+
     pattern_key = match_workaround_pattern(advisory.workaround_text)
     if pattern_key is None:
         if advisory.workaround_text.strip():
@@ -120,6 +165,8 @@ def _evaluate_device(
                     "Manually confirm it's applied, or upgrade to "
                     f"{matched_range.fixed_version or 'the fixed version'}."
                 ),
+                feature_status=agg_feature_status,
+                features_checked=features_to_check,
             )
         return DeviceFinding(
             device=device_name, adom=adom, product=product_label,
@@ -129,6 +176,8 @@ def _evaluate_device(
                 f"Firmware {firmware} is affected and no workaround is published. "
                 f"Upgrade to {matched_range.fixed_version or 'the fixed version'}."
             ),
+            feature_status=agg_feature_status,
+            features_checked=features_to_check,
         )
 
     if skip_workaround_check:
@@ -141,6 +190,8 @@ def _evaluate_device(
                 f"Firmware {firmware} is affected. Workaround check deferred: "
                 f"fleet scan time budget exceeded. Manual verification required."
             ),
+            feature_status=agg_feature_status,
+            features_checked=features_to_check,
         )
 
     try:
@@ -152,6 +203,8 @@ def _evaluate_device(
             workaround_status="manual_verification_required",
             verdict="config_change_required",
             reason=f"Firmware {firmware} is affected. Workaround check failed: {exc}. Manual verification required.",
+            feature_status=agg_feature_status,
+            features_checked=features_to_check,
         )
     if status == "in_place":
         return DeviceFinding(
@@ -162,6 +215,8 @@ def _evaluate_device(
                 f"Firmware {firmware} is affected, but the workaround is already "
                 f"in place: {advisory.workaround_text}"
             ),
+            feature_status=agg_feature_status,
+            features_checked=features_to_check,
         )
     elif status == "not_in_place":
         return DeviceFinding(
@@ -173,6 +228,8 @@ def _evaluate_device(
                 f"Firmware {firmware} is affected and the workaround is NOT in place: "
                 f"{advisory.workaround_text}"
             ),
+            feature_status=agg_feature_status,
+            features_checked=features_to_check,
         )
     else:  # manual_verification_required
         return DeviceFinding(
@@ -184,6 +241,8 @@ def _evaluate_device(
                 f"Firmware {firmware} is affected and the workaround status is unknown "
                 f"(manual verification required): {advisory.workaround_text}"
             ),
+            feature_status=agg_feature_status,
+            features_checked=features_to_check,
         )
 
 
@@ -211,6 +270,12 @@ def assess(
     """
     advisory = enrich_advisory(advisory, http_client, kev_url)
     kev_hit = getattr(advisory, "_kev_hit", False)
+
+    # Detect which services/features the advisory mentions (keyword scan).
+    # This runs once on the full advisory text and is passed into every
+    # per-device evaluation so config reads happen only for affected devices.
+    advisory_text = " ".join(filter(None, [advisory.description, advisory.workaround_text]))
+    affected_features = detect_affected_features(advisory_text)
 
     out_of_scope = sorted({
         r.product for r in advisory.affected_ranges
@@ -246,6 +311,9 @@ def assess(
             findings.append(_evaluate_device(
                 fmg_advisory_no_workaround, fmg_ranges,
                 fmg_label, "-", "FortiManager", fmg_version, fmg_inst,
+                # FortiOS feature checks (SSL-VPN, IPS, etc.) don't apply to
+                # FortiManager — pass an empty list to skip them entirely.
+                affected_features=[],
             ))
 
     # Evaluate every FortiGate device in every ADOM.
@@ -281,6 +349,7 @@ def assess(
                 findings.append(_evaluate_device(
                     advisory, fortios_ranges, name, adom, "FortiOS", firmware, fmg_client,
                     skip_workaround_check=_budget_exceeded,
+                    affected_features=affected_features,
                 ))
 
     any_in_range = any(f.in_range for f in findings)
@@ -300,6 +369,7 @@ def assess(
             kev_hit=kev_hit,
             degraded=degraded,
             warnings=warnings,
+            affected_features=affected_features,
         )
 
     priority, rationale = compute_priority(
@@ -319,4 +389,5 @@ def assess(
         kev_hit=kev_hit,
         degraded=degraded,
         warnings=warnings,
+        affected_features=affected_features,
     )

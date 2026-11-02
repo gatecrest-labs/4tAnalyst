@@ -78,6 +78,9 @@ class DeviceFinding:
     workaround_status: str  # in_place | not_in_place | manual_verification_required | not_applicable
     verdict: str  # no_action | config_change_required | upgrade_required | unknown_needs_manual_check
     reason: str
+    # Feature exposure check results (populated when advisory names a known service/feature)
+    feature_status: str = "not_checked"  # not_checked | active | inactive | unknown
+    features_checked: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -89,6 +92,8 @@ class DeviceFinding:
             "workaround_status": self.workaround_status,
             "verdict": self.verdict,
             "reason": self.reason,
+            "feature_status": self.feature_status,
+            "features_checked": list(self.features_checked),
         }
 
 
@@ -102,6 +107,8 @@ class PsirtAssessment:
     kev_hit: bool = False
     degraded: bool = False
     warnings: list[str] = field(default_factory=list)
+    # Service/feature keywords detected in the advisory text
+    affected_features: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -113,4 +120,5 @@ class PsirtAssessment:
             "kev_hit": self.kev_hit,
             "degraded": self.degraded,
             "warnings": list(self.warnings),
+            "affected_features": list(self.affected_features),
         }

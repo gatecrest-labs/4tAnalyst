@@ -212,6 +212,16 @@ def assess_fleet_exposure(advisory: dict[str, Any]) -> dict:
     Claude Code session can write the report to the local workstation — the
     MCP server never writes files to disk.
 
+    The returned dict includes:
+      - advisory_id, priority, priority_rationale, kev_hit, degraded, warnings
+      - total_findings, verdict_counts — fleet-wide verdict breakdown
+      - affected_features — list of service/feature keys detected in the advisory
+        text (e.g. ["ssl_vpn", "radius"]); empty list means no known features found
+      - feature_exposure_summary — per-finding aggregated feature_status counts
+        (active/inactive/unknown) for findings where features were checked
+      - html_content — full HTML report string (write to output/PSIRT/<id>/<id>.html)
+      - html_error — populated if HTML rendering failed; call render_psirt_report to retry
+
     The caller should write html_content to a local path such as:
         output/PSIRT/<advisory_id>/<advisory_id>.html
     """
@@ -269,7 +279,16 @@ def assess_fleet_exposure(advisory: dict[str, Any]) -> dict:
         html_error = str(exc)
 
     from collections import Counter
-    verdict_counts = dict(Counter(f["verdict"] for f in payload.get("findings", [])))
+    findings = payload.get("findings", [])
+    verdict_counts = dict(Counter(f["verdict"] for f in findings))
+
+    # Aggregate feature_status across findings where features were checked.
+    feature_exposure_summary = dict(Counter(
+        f.get("feature_status", "not_checked")
+        for f in findings
+        if f.get("features_checked")
+    ))
+
     return {
         "advisory_id": advisory_id,
         "priority": payload.get("priority"),
@@ -277,8 +296,10 @@ def assess_fleet_exposure(advisory: dict[str, Any]) -> dict:
         "kev_hit": payload.get("kev_hit"),
         "degraded": payload.get("degraded"),
         "warnings": payload.get("warnings", []),
-        "total_findings": len(payload.get("findings", [])),
+        "total_findings": len(findings),
         "verdict_counts": verdict_counts,
+        "affected_features": payload.get("affected_features", []),
+        "feature_exposure_summary": feature_exposure_summary,
         "html_content": html_content,
         "html_error": html_error,
         "plan_type": "psirt_advisory",

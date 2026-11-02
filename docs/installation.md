@@ -227,6 +227,15 @@ Systemd template (VM deployment, e.g. RHEL)
 
 - A systemd unit template for the unified server is provided at `systemd/4tanalyst.service` (one unit — `MCP_TRANSPORT=http` plus `FW_ANALYST_TOKEN` via EnvironmentFile). The unit runs as the `4tanalyst` user — ensure `User=4tanalyst` is set in the `[Service]` section. Adjust ExecStart and paths for your host environment.
 
+GitLab CI deploy (main branch): the `deploy` job pulls the code, runs `scripts/deploy-install.sh` to sync the venv to `constraints.txt`, then restarts the service. The runner user needs these sudo rules (substitute your runner account):
+
+```
+<runner-user> ALL=(4tanalyst) NOPASSWD: /usr/bin/git, /opt/4tanalyst/scripts/deploy-install.sh
+<runner-user> ALL=(root)      NOPASSWD: /usr/bin/systemctl restart 4tanalyst
+```
+
+Keep these narrow: do not grant `bash` or `uv` directly. The script sets `HOME` and `UV_NO_CONFIG` itself, which `sudo -u 4tanalyst uv …` otherwise gets wrong (`failed to open file ~/uv.toml`). Adjust the paths and match the existing git/systemctl rules on your host.
+
 If you prefer to maintain your own start script, the commands below show what scripts/start-all.sh runs:
 
 ```bash

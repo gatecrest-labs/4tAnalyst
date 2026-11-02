@@ -45,6 +45,25 @@ def test_usage_endpoint_rejects_bad_token(client):
     assert r.status_code == 401
 
 
+@pytest.mark.parametrize("content", [
+    b'{"input_tokens": 12, "outpu',  # truncated JSON
+    b"",                              # empty body
+    b"[1, 2, 3]",                     # valid JSON, not an object
+    b'{"input_tokens": "abc"}',       # non-numeric token count
+    b'{"input_tokens": null}',        # null token count
+])
+def test_usage_endpoint_malformed_body_is_400(client, content):
+    c, db = client
+    r = c.post("/api/usage",
+               headers={"Authorization": "Bearer engtoken",
+                        "Content-Type": "application/json"},
+               content=content)
+    assert r.status_code == 400
+    assert r.json() == {"error": "invalid request body"}
+    db._queue.join()
+    assert db.query_usage_events(range_seconds=3600) == []
+
+
 def test_usage_endpoint_accepts_admin_token(client):
     c, db = client
     r = c.post("/api/usage",

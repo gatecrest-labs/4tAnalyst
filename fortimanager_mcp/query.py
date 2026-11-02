@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 # System status
 # ---------------------------------------------------------------------------
 
+
 def get_system_status(client: FortiManagerClient) -> dict[str, Any]:
     """
     Return FortiManager system status. Field names on the raw FMG response
@@ -65,6 +66,7 @@ def get_ha_status(client: FortiManagerClient) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # ADOM / device helpers
 # ---------------------------------------------------------------------------
+
 
 def list_adoms(client: FortiManagerClient) -> list[dict]:
     """Return a summarised list of all ADOMs."""
@@ -109,12 +111,14 @@ def list_device_vdoms(client: FortiManagerClient, adom: str, device: str) -> lis
     for v in vdoms:
         if not isinstance(v, dict):
             continue
-        result.append({
-            "name": v.get("name", ""),
-            "vdom_type": v.get("vdom_type", v.get("type", "")),
-            "opmode": v.get("opmode", ""),
-            "status": v.get("status", ""),
-        })
+        result.append(
+            {
+                "name": v.get("name", ""),
+                "vdom_type": v.get("vdom_type", v.get("type", "")),
+                "opmode": v.get("opmode", ""),
+                "status": v.get("status", ""),
+            }
+        )
     return result
 
 
@@ -139,7 +143,9 @@ def search_devices(
     if connection_status:
         conn_filter = connection_status.strip().lower()
         if conn_filter not in ("up", "down"):
-            return {"error": f"connection_status must be 'up' or 'down', got {connection_status!r}"}
+            return {
+                "error": f"connection_status must be 'up' or 'down', got {connection_status!r}"
+            }
 
     devices = client.get_devices(adom)
     matches = []
@@ -156,14 +162,16 @@ def search_devices(
         conn_label = _CONN_STATUS_LABELS.get(d.get("conn_status", 0), "unknown")
         if conn_filter and conn_filter != conn_label:
             continue
-        matches.append({
-            "name": d.get("name", ""),
-            "ip": d.get("ip", ""),
-            "platform": platform,
-            "os_ver": d.get("os_ver", ""),
-            "conn_status": conn_label,
-            "db_status": d.get("db_status", ""),
-        })
+        matches.append(
+            {
+                "name": d.get("name", ""),
+                "ip": d.get("ip", ""),
+                "platform": platform,
+                "os_ver": d.get("os_ver", ""),
+                "conn_status": conn_label,
+                "db_status": d.get("db_status", ""),
+            }
+        )
 
     return {"count": len(matches), "devices": matches}
 
@@ -253,6 +261,31 @@ def _get_global_addresses(
         raise
 
 
+def _vip_as_addr_obj(vip: dict) -> dict | None:
+    """Convert a VIP dict to a synthetic address-object dict for AddressCatalog.
+
+    VIP extip is the externally-visible IP — the address referenced in policy
+    dstaddr fields.  Supports single IP, CIDR, or start-end range strings.
+    Returns None for empty or malformed entries.
+    """
+    name = vip.get("name", "")
+    extip = vip.get("extip", "")
+    if isinstance(extip, list):
+        extip = extip[0] if extip else ""
+    extip = str(extip).strip()
+    if not name or not extip:
+        return None
+    if "-" in extip:
+        parts = extip.split("-", 1)
+        return {
+            "name": name,
+            "type": "iprange",
+            "start-ip": parts[0].strip(),
+            "end-ip": parts[1].strip(),
+        }
+    return {"name": name, "type": "ipmask", "subnet": extip}
+
+
 def build_catalogs(
     client: FortiManagerClient, adom: str
 ) -> tuple[AddressCatalog, ServiceCatalog]:
@@ -269,7 +302,9 @@ def build_catalogs(
         with _catalog_lock:
             entry = _catalog_cache.get(key)
             if entry and (now - entry[0]) < _CATALOG_TTL:
-                logger.debug("Catalog cache HIT for %s (age %.0fs)", key, now - entry[0])
+                logger.debug(
+                    "Catalog cache HIT for %s (age %.0fs)", key, now - entry[0]
+                )
                 return entry[1], entry[2]
             # Another thread is already fetching — wait for it
             if key in _catalog_inflight:
@@ -288,11 +323,11 @@ def build_catalogs(
         # Global objects are host-wide — fetched once and shared across all ADOMs.
         # Per-ADOM addr/svc objects and global objects are fetched concurrently.
         fetches = {
-            "addr":    lambda: client.get_address_objects(adom),
+            "addr": lambda: client.get_address_objects(adom),
             "addr_grp": lambda: client.get_address_groups(adom),
-            "vip":     lambda: client.get_central_dnat_rules(adom, ""),
-            "svc":     lambda: client.get_service_objects(adom),
+            "svc": lambda: client.get_service_objects(adom),
             "svc_grp": lambda: client.get_service_groups(adom),
+            "vip": lambda: client.get_vip_objects(adom),
         }
         results: dict[str, list] = {}
         with ThreadPoolExecutor(max_workers=5) as pool:
@@ -302,12 +337,12 @@ def build_catalogs(
             for future in as_completed(futures):
                 results[futures[future]] = future.result()
 
+        vip_addr_objs = [o for o in (_vip_as_addr_obj(v) for v in results["vip"]) if o]
         addr_catalog = AddressCatalog(
-            results["addr"],
+            results["addr"] + vip_addr_objs,
             results["addr_grp"],
             global_objs,
             global_grps,
-            results["vip"],
         )
         svc_catalog = ServiceCatalog(
             results["svc"],
@@ -369,14 +404,21 @@ def search_fqdn_rules(
         return result
 
     device_pkgs = [
-        p for p in packages
+        p
+        for p in packages
         if isinstance(p, dict) and _package_targets_device(p, device)
     ]
 
     coverage: dict[str, dict] = {
-        f: {"fqdn": f, "covered": False, "address_object_name": None,
-            "via_group": None, "rule_id": None, "rule_name": None,
-            "rule_enabled": False}
+        f: {
+            "fqdn": f,
+            "covered": False,
+            "address_object_name": None,
+            "via_group": None,
+            "rule_id": None,
+            "rule_name": None,
+            "rule_enabled": False,
+        }
         for f in fqdns
     }
 
@@ -408,19 +450,26 @@ def search_fqdn_rules(
                 if fqdn_set:
                     for f in fqdn_set:
                         pol_fqdns.add(f)
-                        if fqdn_catalog._groups.get(dst_name) and f not in dst_group_for:
+                        if (
+                            fqdn_catalog._groups.get(dst_name)
+                            and f not in dst_group_for
+                        ):
                             dst_group_for[f] = dst_name
 
             for fqdn_str in fqdns:
                 if fqdn_str in pol_fqdns and not coverage[fqdn_str]["covered"]:
-                    coverage[fqdn_str].update({
-                        "covered": True,
-                        "address_object_name": fqdn_catalog.exact_match_name(fqdn_str),
-                        "via_group": dst_group_for.get(fqdn_str),
-                        "rule_id": pol.get("policyid"),
-                        "rule_name": pol.get("name", ""),
-                        "rule_enabled": pol_enabled,
-                    })
+                    coverage[fqdn_str].update(
+                        {
+                            "covered": True,
+                            "address_object_name": fqdn_catalog.exact_match_name(
+                                fqdn_str
+                            ),
+                            "via_group": dst_group_for.get(fqdn_str),
+                            "rule_id": pol.get("policyid"),
+                            "rule_name": pol.get("name", ""),
+                            "rule_enabled": pol_enabled,
+                        }
+                    )
 
     result["results"] = list(coverage.values())
 
@@ -480,9 +529,15 @@ def build_policy_snapshot(
         def _fetch_pkg(pkg: dict) -> tuple[str, list[dict] | None]:
             pkg_name = pkg.get("name", "")
             try:
-                return pkg_name, [p for p in client.get_policies(adom, pkg_name) if isinstance(p, dict)]
+                return pkg_name, [
+                    p
+                    for p in client.get_policies(adom, pkg_name)
+                    if isinstance(p, dict)
+                ]
             except FortiManagerAPIError as exc:
-                logger.warning("Policy cache: failed to fetch %s/%s: %s", adom, pkg_name, exc)
+                logger.warning(
+                    "Policy cache: failed to fetch %s/%s: %s", adom, pkg_name, exc
+                )
                 return pkg_name, None  # None = fetch failed; [] = successfully empty
 
         policies_by_package: dict[str, list[dict] | None] = {}
@@ -528,7 +583,9 @@ def get_device_policies(
 
     logger.info(
         "Policy cache MISS (device path) for %s — fetching %d package(s) directly: %s",
-        key, len(device_pkgs), device_pkgs,
+        key,
+        len(device_pkgs),
+        device_pkgs,
     )
 
     def _fetch(pkg_name: str) -> tuple[str, list[dict] | None]:
@@ -598,7 +655,8 @@ def search_policies(
         return result
 
     device_pkgs = [
-        p for p in packages
+        p
+        for p in packages
         if isinstance(p, dict) and _package_targets_device(p, device)
     ]
 
@@ -609,7 +667,9 @@ def search_policies(
         try:
             policies = client.get_policies(adom, pkg_name)
         except FortiManagerAPIError as exc:
-            logger.warning("Could not fetch policies from %s/%s: %s", adom, pkg_name, exc)
+            logger.warning(
+                "Could not fetch policies from %s/%s: %s", adom, pkg_name, exc
+            )
             message, code = safe_error(exc)
             result["packages_failed"].append(
                 {"package": pkg_name, "error": message, "error_code": code}
@@ -639,11 +699,7 @@ def _package_targets_device(pkg: dict, device: str) -> bool:
     scope = pkg.get("scope member", pkg.get("scope_member", []))
     if not scope:
         return True  # global/unscoped packages apply to all
-    return any(
-        s.get("name", "") == device
-        for s in scope
-        if isinstance(s, dict)
-    )
+    return any(s.get("name", "") == device for s in scope if isinstance(s, dict))
 
 
 def _object_covers_target(target, obj: dict) -> bool:
@@ -695,9 +751,8 @@ def _summarise_policy(pol: dict, package_name: str) -> dict[str, Any]:
 # Address object search
 # ---------------------------------------------------------------------------
 
-def get_address_object(
-    client: FortiManagerClient, adom: str, name_or_ip: str
-) -> dict:
+
+def get_address_object(client: FortiManagerClient, adom: str, name_or_ip: str) -> dict:
     """
     Look up by exact name, or fall back to IP search if the name lookup
     returns nothing. Also checks the global ADOM for inherited objects.
@@ -775,6 +830,7 @@ def _summarise_address_object(obj: dict, scope: str) -> dict[str, Any]:
 # Service object search
 # ---------------------------------------------------------------------------
 
+
 def get_service_object(
     client: FortiManagerClient, adom: str, name_or_port: str
 ) -> dict:
@@ -828,9 +884,8 @@ def _summarise_service_object(obj: dict) -> dict[str, Any]:
 # Individual policy detail
 # ---------------------------------------------------------------------------
 
-def get_policy(
-    client: FortiManagerClient, adom: str, pkg: str, policy_id: int
-) -> dict:
+
+def get_policy(client: FortiManagerClient, adom: str, pkg: str, policy_id: int) -> dict:
     """Return full detail for a single policy."""
     raw = client.get_policy(adom, pkg, policy_id)
     return _summarise_policy(raw, pkg)
@@ -839,6 +894,7 @@ def get_policy(
 # ---------------------------------------------------------------------------
 # Interface / zone map
 # ---------------------------------------------------------------------------
+
 
 def get_interface_map(
     client: FortiManagerClient, adom: str, device: str
@@ -857,18 +913,20 @@ def get_interface_map(
         name = iface.get("name", "")
         alias = iface.get("alias", "")
         policy_zone = lookup_policy_zone(zone_map, device, name)
-        iface_list.append({
-            "name": name,
-            "ip": iface.get("ip", ""),
-            "type": iface.get("type", ""),
-            "zone": iface.get("zone", ""),
-            "vlanid": iface.get("vlanid", 0),
-            "alias": alias,
-            "description": iface.get("description", ""),
-            "status": iface.get("status", "up"),
-            "policy_zone": policy_zone,
-            "zone_map_missing": policy_zone is None,
-        })
+        iface_list.append(
+            {
+                "name": name,
+                "ip": iface.get("ip", ""),
+                "type": iface.get("type", ""),
+                "zone": iface.get("zone", ""),
+                "vlanid": iface.get("vlanid", 0),
+                "alias": alias,
+                "description": iface.get("description", ""),
+                "status": iface.get("status", "up"),
+                "policy_zone": policy_zone,
+                "zone_map_missing": policy_zone is None,
+            }
+        )
 
     zone_map_warnings: list[str] = []
     if map_file_missing:
@@ -909,18 +967,22 @@ def get_device_interface_config(
     supports server-side VLAN filtering, which the live monitor proxy does not.
     """
     raw = client.get_device_interface_config(device, vlanids=vlanids, name=name)
-    raw_list = raw if isinstance(raw, list) else ([raw] if isinstance(raw, dict) else [])
+    raw_list = (
+        raw if isinstance(raw, list) else ([raw] if isinstance(raw, dict) else [])
+    )
     summary = []
     for iface in raw_list:
         if not isinstance(iface, dict):
             continue
-        summary.append({
-            "name": iface.get("name", ""),
-            "alias": iface.get("alias", ""),
-            "vlanid": iface.get("vlanid", 0),
-            "ip": iface.get("ip", ""),
-            "status": iface.get("status", "up"),
-        })
+        summary.append(
+            {
+                "name": iface.get("name", ""),
+                "alias": iface.get("alias", ""),
+                "vlanid": iface.get("vlanid", 0),
+                "ip": iface.get("ip", ""),
+                "status": iface.get("status", "up"),
+            }
+        )
     return {
         "device": device,
         "interfaces": raw,
@@ -932,6 +994,7 @@ def get_device_interface_config(
 # ---------------------------------------------------------------------------
 # Routing table
 # ---------------------------------------------------------------------------
+
 
 def _normalize_live_route(r: dict, vdom: str) -> "dict | None":
     """Convert one FortiOS monitor route dict to the common normalized format.
@@ -959,6 +1022,7 @@ def _normalize_live_route(r: dict, vdom: str) -> "dict | None":
                 dst = f"{ip}/{mask_raw}"
             elif "." in str(mask_raw):
                 import ipaddress as _ip
+
                 prefix = _ip.IPv4Network(f"0.0.0.0/{mask_raw}", strict=False).prefixlen
                 dst = f"{ip}/{prefix}"
             else:
@@ -1029,6 +1093,7 @@ def _parse_live_routes(raw: Any) -> "list[dict] | None":
     if isinstance(response, str):
         try:
             import json as _j
+
             response = _j.loads(response)
         except Exception:
             return None
@@ -1071,9 +1136,7 @@ def _parse_live_routes(raw: Any) -> "list[dict] | None":
     return routes if routes else None
 
 
-def get_routing_table(
-    client: FortiManagerClient, adom: str, device: str
-) -> list[dict]:
+def get_routing_table(client: FortiManagerClient, adom: str, device: str) -> list[dict]:
     """Return the active routing table for a device.
 
     Tries the live FMG proxy API first (/api/v2/monitor/router/ipv4?vdom=*)
@@ -1087,19 +1150,26 @@ def get_routing_table(
         if live_routes:
             logger.debug(
                 "get_routing_table %s/%s: live proxy returned %d routes",
-                adom, device, len(live_routes),
+                adom,
+                device,
+                len(live_routes),
             )
             return live_routes
         logger.warning(
             "get_routing_table %s/%s: live proxy succeeded but returned no parseable routes "
             "(raw type=%s, value=%r); falling back to CMDB statics",
-            adom, device, type(raw_live).__name__, raw_live,
+            adom,
+            device,
+            type(raw_live).__name__,
+            raw_live,
         )
     except Exception as exc:
         logger.warning(
             "get_routing_table %s/%s: live proxy call failed (%s); "
             "falling back to CMDB statics",
-            adom, device, exc,
+            adom,
+            device,
+            exc,
         )
 
     # --- CMDB static routes (fallback) ---
@@ -1110,21 +1180,25 @@ def get_routing_table(
             continue
         raw_device = r.get("device", "")
         device_str = (
-            raw_device[0] if isinstance(raw_device, list) and raw_device
-            else raw_device if isinstance(raw_device, str)
+            raw_device[0]
+            if isinstance(raw_device, list) and raw_device
+            else raw_device
+            if isinstance(raw_device, str)
             else str(raw_device)
         )
-        result.append({
-            "seq_num": r.get("seq-num", 0),
-            "dst": r.get("dst", ""),
-            "gateway": r.get("gateway", ""),
-            "device": device_str,
-            "distance": r.get("distance", 10),
-            "priority": r.get("priority", 0),
-            "comment": r.get("comment", ""),
-            "status": r.get("status", "enable"),
-            "vdom": r.get("_vdom", "root"),
-        })
+        result.append(
+            {
+                "seq_num": r.get("seq-num", 0),
+                "dst": r.get("dst", ""),
+                "gateway": r.get("gateway", ""),
+                "device": device_str,
+                "distance": r.get("distance", 10),
+                "priority": r.get("priority", 0),
+                "comment": r.get("comment", ""),
+                "status": r.get("status", "enable"),
+                "vdom": r.get("_vdom", "root"),
+            }
+        )
     result.sort(key=lambda r: r["seq_num"])
     return result
 
@@ -1132,6 +1206,7 @@ def get_routing_table(
 # ---------------------------------------------------------------------------
 # Device client location (detected-client inventory)
 # ---------------------------------------------------------------------------
+
 
 def _proxy_results(raw: Any) -> Any:
     """Extract the FortiGate payload from a FMG proxy-response envelope."""
@@ -1144,12 +1219,17 @@ def _proxy_results(raw: Any) -> Any:
     return None
 
 
-def _client_matches(rec: dict, ip: str | None, mac: str | None, hostname: str | None) -> bool:
+def _client_matches(
+    rec: dict, ip: str | None, mac: str | None, hostname: str | None
+) -> bool:
     if ip and rec.get("ipv4_address") != ip.strip():
         return False
     if mac and str(rec.get("mac", "")).lower() != mac.strip().lower():
         return False
-    if hostname and hostname.strip().lower() not in str(rec.get("hostname", "")).lower():
+    if (
+        hostname
+        and hostname.strip().lower() not in str(rec.get("hostname", "")).lower()
+    ):
         return False
     return True
 
@@ -1183,10 +1263,14 @@ def get_device_client_location(
     """
     raw = client.get_device_client_location(adom, device)
     results = _proxy_results(raw)
-    records = [r for r in results if isinstance(r, dict)] if isinstance(results, list) else []
+    records = (
+        [r for r in results if isinstance(r, dict)] if isinstance(results, list) else []
+    )
 
     has_filter = bool(ip or mac or hostname)
-    matched = [r for r in records if not has_filter or _client_matches(r, ip, mac, hostname)]
+    matched = [
+        r for r in records if not has_filter or _client_matches(r, ip, mac, hostname)
+    ]
     return {
         "adom": adom,
         "device": device,
@@ -1199,6 +1283,7 @@ def get_device_client_location(
 # ---------------------------------------------------------------------------
 # SD-WAN configuration
 # ---------------------------------------------------------------------------
+
 
 def _as_list(value: Any) -> list[Any]:
     if isinstance(value, list):
@@ -1256,13 +1341,15 @@ def _summarise_sdwan_monitor(members_raw: Any, health_raw: Any) -> dict[str, Any
             for member, stats in per_member.items():
                 if not isinstance(stats, dict):
                     continue
-                sla.append({
-                    "health_check": hc_name,
-                    "interface": member,
-                    "status": stats.get("status"),
-                    "latency": stats.get("latency"),
-                    "packet_loss": stats.get("packet_loss"),
-                })
+                sla.append(
+                    {
+                        "health_check": hc_name,
+                        "interface": member,
+                        "status": stats.get("status"),
+                        "latency": stats.get("latency"),
+                        "packet_loss": stats.get("packet_loss"),
+                    }
+                )
 
     return {
         "member_count": len(members),

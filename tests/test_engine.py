@@ -99,13 +99,13 @@ class FakeFMGClient:
     def get_global_address_groups(self):
         return []
 
-    def get_central_dnat_rules(self, adom, pkg):
-        return []
-
     def get_service_objects(self, adom):
         return []
 
     def get_service_groups(self, adom):
+        return []
+
+    def get_vip_objects(self, adom):
         return []
 
     def get_device_interfaces(self, adom, device):
@@ -459,9 +459,6 @@ class EngineFMG:
     def get_global_address_groups(self):
         return []
 
-    def get_central_dnat_rules(self, adom, pkg):
-        return []
-
     def get_service_objects(self, adom):
         return [
             {"name": "HTTPS", "protocol": "TCP/UDP/SCTP", "tcp-portrange": "443"},
@@ -470,6 +467,9 @@ class EngineFMG:
         ]
 
     def get_service_groups(self, adom):
+        return []
+
+    def get_vip_objects(self, adom):
         return []
 
     def get_device_interfaces(self, adom, device):

@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 
 # JSON-RPC error codes
 _FMG_ERRORS = {
-    -6:  "Invalid URL / endpoint not found",
-    -9:  "Object not found",
+    -6: "Invalid URL / endpoint not found",
+    -9: "Object not found",
     -10: "Permission denied (check API key has read access)",
     -11: "No permission for the resource (check the admin profile's JSON API Access / ADOM scope)",
     -22: "Login fail (bad credential, JSON API Access disabled, or Trusted Hosts block this source IP)",
@@ -150,7 +150,9 @@ class FortiManagerClient:
         result if 'data' is absent.
         """
         if not self._active_host:
-            raise FortiManagerAPIError("FortiManagerClient.login() must be called first")
+            raise FortiManagerAPIError(
+                "FortiManagerClient.login() must be called first"
+            )
 
         base_url = f"https://{self._active_host}:{self._port}{self._JSONRPC_PATH}"
         with self._id_lock:
@@ -364,9 +366,7 @@ class FortiManagerClient:
 
     def get_device_interfaces(self, adom: str, device: str) -> list[dict]:
         """Return interface definitions for a managed device."""
-        return self._get_all(
-            f"/pm/config/device/{device}/vdom/root/system/interface"
-        )
+        return self._get_all(f"/pm/config/device/{device}/vdom/root/system/interface")
 
     def get_device_interface_config(
         self, device: str, vlanids: list[int] | None = None, name: str | None = None
@@ -386,7 +386,115 @@ class FortiManagerClient:
             params["filter"] = name_clause
         elif vlan_clause:
             params["filter"] = vlan_clause
-        return self._rpc("get", f"/pm/config/device/{device}/global/system/interface", params)
+        return self._rpc(
+            "get", f"/pm/config/device/{device}/global/system/interface", params
+        )
+
+    # ------------------------------------------------------------------
+    # Feature exposure config reads (used by psirt/feature_checks.py)
+    # All paths are device-DB reads — work even when devices are offline.
+    # ------------------------------------------------------------------
+
+    def get_ssl_vpn_settings(self, device: str, vdom: str = "root") -> dict:
+        """Return SSL-VPN settings for a device VDOM. Check 'status' field."""
+        result = self._rpc("get", f"/pm/config/device/{device}/vdom/{vdom}/vpn/ssl/settings", {})
+        return result if isinstance(result, dict) else {}
+
+    def get_ipsec_phase1(self, device: str, vdom: str = "root") -> list:
+        """Return IPsec phase1-interface configs. Non-empty means IPsec is configured."""
+        return self._get_all(f"/pm/config/device/{device}/vdom/{vdom}/vpn/ipsec/phase1-interface")
+
+    def get_bgp_config(self, device: str, vdom: str = "root") -> dict:
+        """Return BGP router config. Check 'as' field — non-zero means BGP is configured."""
+        result = self._rpc("get", f"/pm/config/device/{device}/vdom/{vdom}/router/bgp", {})
+        return result if isinstance(result, dict) else {}
+
+    def get_ospf_config(self, device: str, vdom: str = "root") -> dict:
+        """Return OSPF router config. Check 'area' list — non-empty means OSPF is configured."""
+        result = self._rpc("get", f"/pm/config/device/{device}/vdom/{vdom}/router/ospf", {})
+        return result if isinstance(result, dict) else {}
+
+    def get_radius_servers(self, device: str, vdom: str = "root") -> list:
+        """Return RADIUS server configs. Non-empty means RADIUS is configured."""
+        return self._get_all(f"/pm/config/device/{device}/vdom/{vdom}/user/radius")
+
+    def get_ldap_servers(self, device: str, vdom: str = "root") -> list:
+        """Return LDAP server configs. Non-empty means LDAP is configured."""
+        return self._get_all(f"/pm/config/device/{device}/vdom/{vdom}/user/ldap")
+
+    def get_saml_servers(self, device: str, vdom: str = "root") -> list:
+        """Return SAML server configs. Non-empty means SAML is configured."""
+        return self._get_all(f"/pm/config/device/{device}/vdom/{vdom}/user/saml")
+
+    def get_ztna_access_proxy(self, device: str, vdom: str = "root") -> list:
+        """Return ZTNA access-proxy configs. Non-empty means ZTNA is configured."""
+        return self._get_all(f"/pm/config/device/{device}/vdom/{vdom}/firewall/access-proxy")
+
+    def get_multicast_config(self, device: str, vdom: str = "root") -> dict:
+        """Return multicast router config. Check 'pim-sm-global.status' or 'interface' list."""
+        result = self._rpc("get", f"/pm/config/device/{device}/vdom/{vdom}/router/multicast", {})
+        return result if isinstance(result, dict) else {}
+
+    def get_snmp_sysinfo(self, device: str, vdom: str = "root") -> dict:
+        """Return SNMP sysinfo config. Check 'status' field."""
+        result = self._rpc("get", f"/pm/config/device/{device}/vdom/{vdom}/system/snmp/sysinfo", {})
+        return result if isinstance(result, dict) else {}
+
+    def get_dhcp_servers(self, device: str, vdom: str = "root") -> list:
+        """Return DHCP server configs. Non-empty means a DHCP server is active."""
+        return self._get_all(f"/pm/config/device/{device}/vdom/{vdom}/system/dhcp/server")
+
+    # Global (non-VDOM) system settings
+    def get_ntp_config(self, device: str) -> dict:
+        """Return global NTP config. Check 'ntpsync' field for enable/disable."""
+        result = self._rpc("get", f"/pm/config/device/{device}/global/system/ntp", {})
+        return result if isinstance(result, dict) else {}
+
+    def get_dns_config(self, device: str) -> dict:
+        """Return global DNS config. Check 'primary'/'secondary' for configured resolvers."""
+        result = self._rpc("get", f"/pm/config/device/{device}/global/system/dns", {})
+        return result if isinstance(result, dict) else {}
+
+    def get_ha_config(self, device: str) -> dict:
+        """Return global HA config. Check 'mode' — 'a-a'/'a-p' means HA is active."""
+        result = self._rpc("get", f"/pm/config/device/{device}/global/system/ha", {})
+        return result if isinstance(result, dict) else {}
+
+    def get_fortiguard_config(self, device: str) -> dict:
+        """Return global FortiGuard config. Check 'update-server-location' for active service."""
+        result = self._rpc("get", f"/pm/config/device/{device}/global/system/fortiguard", {})
+        return result if isinstance(result, dict) else {}
+
+    def get_central_management(self, device: str) -> dict:
+        """Return global central-management config. Check 'type' == 'fortimanager' for FGFM."""
+        result = self._rpc("get", f"/pm/config/device/{device}/global/system/central-management", {})
+        return result if isinstance(result, dict) else {}
+
+    # Per-VDOM user and security-profile reads
+    def get_local_users(self, device: str, vdom: str = "root") -> list:
+        """Return local user configs. Check 'two-factor' field per user for 2FA."""
+        return self._get_all(f"/pm/config/device/{device}/vdom/{vdom}/user/local")
+
+    def get_user_settings(self, device: str, vdom: str = "root") -> dict:
+        """Return VDOM user/setting config. Check 'captive-portal-ip' for captive portal."""
+        result = self._rpc("get", f"/pm/config/device/{device}/vdom/{vdom}/user/setting", {})
+        return result if isinstance(result, dict) else {}
+
+    def get_ips_sensors(self, device: str, vdom: str = "root") -> list:
+        """Return IPS sensor profiles. Non-empty means IPS is configured."""
+        return self._get_all(f"/pm/config/device/{device}/vdom/{vdom}/ips/sensor")
+
+    def get_av_profiles(self, device: str, vdom: str = "root") -> list:
+        """Return antivirus profiles. Non-empty means AV is configured."""
+        return self._get_all(f"/pm/config/device/{device}/vdom/{vdom}/antivirus/profile")
+
+    def get_webfilter_profiles(self, device: str, vdom: str = "root") -> list:
+        """Return web filter profiles. Non-empty means web filtering is configured."""
+        return self._get_all(f"/pm/config/device/{device}/vdom/{vdom}/webfilter/profile")
+
+    def get_app_sensors(self, device: str, vdom: str = "root") -> list:
+        """Return application control sensor lists. Non-empty means app control is configured."""
+        return self._get_all(f"/pm/config/device/{device}/vdom/{vdom}/application/list")
 
     def _proxy(self, action: str, resource: str, target: list[str]) -> Any:
         """Execute a FortiGate REST call via FortiManager's device proxy (EXEC /sys/proxy/json).
@@ -396,13 +504,17 @@ class FortiManagerClient:
 
         _rpc spreads the params dict with "url", so passing {"data": {...}} produces the correct shape.
         """
-        return self._rpc("exec", "/sys/proxy/json", {
-            "data": {
-                "action": action,
-                "resource": resource,
-                "target": target,
-            }
-        })
+        return self._rpc(
+            "exec",
+            "/sys/proxy/json",
+            {
+                "data": {
+                    "action": action,
+                    "resource": resource,
+                    "target": target,
+                }
+            },
+        )
 
     def get_device_client_location(self, adom: str, device: str) -> Any:
         """Return the raw detected-client inventory proxy envelope for a device."""
@@ -414,13 +526,21 @@ class FortiManagerClient:
 
     def get_device_sdwan(self, device: str, vdom: str = "root") -> Any:
         """Return the device-DB SD-WAN config (members/zones/rules) for a managed device."""
-        return self._rpc("get", f"/pm/config/device/{device}/vdom/{vdom}/system/sdwan", {})
+        return self._rpc(
+            "get", f"/pm/config/device/{device}/vdom/{vdom}/system/sdwan", {}
+        )
 
     def get_device_sdwan_monitor(self, adom: str, device: str) -> tuple[Any, Any]:
         """Return raw (members, health_check) proxy envelopes for live SD-WAN monitor state."""
         target = [f"/adom/{adom}/device/{device}"]
-        members = self._proxy(action="get", resource="/api/v2/monitor/virtual-wan/members", target=target)
-        health = self._proxy(action="get", resource="/api/v2/monitor/virtual-wan/health-check", target=target)
+        members = self._proxy(
+            action="get", resource="/api/v2/monitor/virtual-wan/members", target=target
+        )
+        health = self._proxy(
+            action="get",
+            resource="/api/v2/monitor/virtual-wan/health-check",
+            target=target,
+        )
         return members, health
 
     # ------------------------------------------------------------------
@@ -491,6 +611,24 @@ class FortiManagerClient:
                 return []
             raise
         return [r for r in result if isinstance(r, dict)]
+
+    def get_vip_objects(self, adom: str) -> list[dict]:
+        """Return all firewall VIP objects in an ADOM plus the global database."""
+        results: list[dict] = []
+        for path in (
+            f"/pm/config/adom/{adom}/obj/firewall/vip",
+            "/pm/config/global/obj/firewall/vip",
+        ):
+            try:
+                data = self._get_all(path)
+                results.extend(r for r in data if isinstance(r, dict))
+            except FortiManagerAPIError as exc:
+                if exc.code == -9:
+                    continue
+                raise
+            except Exception:
+                pass
+        return results
 
     def get_central_dnat_rules(self, adom: str, pkg: str) -> list[dict]:
         """List all Central DNAT rules (VIPs) for a policy package.

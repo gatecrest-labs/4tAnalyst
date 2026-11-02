@@ -282,3 +282,105 @@ def test_assess_unreachable_backup_marks_degraded():
                     extra_fmg_clients=[("FortiManager (backup 1: FMG-SITE-B)", _DeadClient())])
     assert result.degraded is True
     assert any("backup" in w for w in result.warnings)
+
+
+# ---------------------------------------------------------------------------
+# Feature exposure check — integration tests (assess() end-to-end)
+# ---------------------------------------------------------------------------
+
+class _FeatureCheckFMGClient(FakeFMGClient):
+    """FakeFMGClient extended to support feature-check method calls."""
+
+    def __init__(self, ssl_vpn_status="disable", ssl_vpn_raises=False, **kwargs):
+        super().__init__(**kwargs)
+        self._ssl_vpn_status = ssl_vpn_status
+        self._ssl_vpn_raises = ssl_vpn_raises
+
+    def get_device_vdoms(self, adom, device):
+        return [{"name": "root"}]
+
+    def get_ssl_vpn_settings(self, device, vdom="root"):
+        if self._ssl_vpn_raises:
+            raise RuntimeError("feature check failed")
+        return {"status": self._ssl_vpn_status}
+
+
+def _ssl_vpn_advisory():
+    """Advisory with SSL-VPN in description — triggers feature exposure check."""
+    return Advisory(
+        advisory_id="FG-IR-24-SSL",
+        cve_ids=["CVE-2024-99999"],
+        cvss_score=9.8,
+        fortinet_severity="Critical",
+        affected_ranges=[
+            AffectedRange(product="FortiOS", min_version="7.4.0",
+                          max_version="7.4.4", fixed_version="7.4.5"),
+        ],
+        description="A vulnerability in SSL-VPN allows unauthenticated remote code execution.",
+        workaround_text="",
+    )
+
+
+def test_feature_all_inactive_downgrades_upgrade_required_to_no_action():
+    """Full assess() path: in-range device with SSL-VPN disabled → no_action."""
+    client = _FeatureCheckFMGClient(
+        ssl_vpn_status="disable",
+        devices_by_adom={"OT-ADOM": [{"name": "FW01", "os_ver": "7", "mr": 4, "patch": 2}]},
+    )
+    result = assess(_ssl_vpn_advisory(), client, _FakeHTTPClient(), kev_url="")
+    assert len(result.findings) == 1
+    finding = result.findings[0]
+    assert finding.in_range is True
+    assert finding.verdict == "no_action"
+    assert finding.feature_status == "inactive"
+    assert "ssl_vpn" in finding.features_checked
+    assert "ssl_vpn" in result.affected_features
+
+
+def test_feature_all_unknown_does_not_downgrade_upgrade_required():
+    """Conservative invariant: unknown feature status must NOT downgrade the verdict."""
+    client = _FeatureCheckFMGClient(
+        ssl_vpn_raises=True,  # check fails → "unknown"
+        devices_by_adom={"OT-ADOM": [{"name": "FW01", "os_ver": "7", "mr": 4, "patch": 2}]},
+    )
+    result = assess(_ssl_vpn_advisory(), client, _FakeHTTPClient(), kev_url="")
+    assert len(result.findings) == 1
+    finding = result.findings[0]
+    assert finding.in_range is True
+    assert finding.verdict == "upgrade_required"
+    assert finding.feature_status == "unknown"
+
+
+def test_feature_active_does_not_affect_verdict():
+    """When a feature is confirmed active, the verdict stays upgrade_required."""
+    client = _FeatureCheckFMGClient(
+        ssl_vpn_status="enable",
+        devices_by_adom={"OT-ADOM": [{"name": "FW01", "os_ver": "7", "mr": 4, "patch": 2}]},
+    )
+    result = assess(_ssl_vpn_advisory(), client, _FakeHTTPClient(), kev_url="")
+    finding = result.findings[0]
+    assert finding.verdict == "upgrade_required"
+    assert finding.feature_status == "active"
+
+
+def test_no_feature_keywords_in_advisory_skips_feature_checks():
+    """Advisory with no known feature keywords: feature_status stays not_checked."""
+    adv = Advisory(
+        advisory_id="FG-IR-24-GEN",
+        cve_ids=["CVE-2024-00001"],
+        affected_ranges=[
+            AffectedRange(product="FortiOS", min_version="7.4.0",
+                          max_version="7.4.4", fixed_version="7.4.5"),
+        ],
+        description="A memory corruption vulnerability in the kernel.",
+        workaround_text="",
+    )
+    client = FakeFMGClient(devices_by_adom={
+        "OT-ADOM": [{"name": "FW01", "os_ver": "7", "mr": 4, "patch": 2}],
+    })
+    result = assess(adv, client, _FakeHTTPClient(), kev_url="")
+    finding = result.findings[0]
+    assert finding.verdict == "upgrade_required"
+    assert finding.feature_status == "not_checked"
+    assert finding.features_checked == []
+    assert result.affected_features == []
