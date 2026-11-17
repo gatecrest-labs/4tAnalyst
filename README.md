@@ -125,4 +125,4 @@ See [SECURITY.md](SECURITY.md) for credential handling, network access requireme
 
 ## License
 
-No license has been chosen yet for public distribution. All rights reserved until a license is added.
+MIT. See [LICENSE](LICENSE). The bundled `.claude/skills/mcp-builder` skill keeps its own Apache 2.0 license (`.claude/skills/mcp-builder/LICENSE.txt`).

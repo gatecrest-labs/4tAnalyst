@@ -297,7 +297,7 @@ zone_policy:
 
 ## Key blocking items before production
 
-See `todo.md` for the full list. Top blockers:
+Top blockers:
 1. **Test FortiManager connectivity** — credentials added, not yet fully validated against live FMG (planner CLI is the quickest end-to-end check)
 2. **TLS / nginx reverse proxy** — bearer auth now enforced on port 8000, but transport is still plain HTTP; TLS termination required in any regulated environment (NERC CIP, HIPAA, PCI-DSS, etc.)
 3. **AI inference path decision** — Bedrock vs. Anthropic direct vs. self-hosted (compliance implications for regulated/sensitive data differ)
@@ -327,8 +327,6 @@ See `todo.md` for the full list. Top blockers:
 
 ## Key reference files
 
-- `todo.md` — comprehensive gap tracker and open questions
-- `highlevel-4tanalyst.md` — problem statement, success metrics, risk register
 - `docs/compliance.md` — regime-agnostic data-sensitivity/compliance analysis (NERC CIP, HIPAA, PCI-DSS, SOX, GDPR) and inference path comparison
 - `docs/engineer-workflow.md` — end-to-end how-to for engineers
 - `docs/workstation-onboarding.md` — one-page laptop setup for engineers doing the sparse checkout (clone/config/verify only)

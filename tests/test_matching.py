@@ -648,16 +648,16 @@ def test_service_catalog_resolves_protocol_number_50():
 def test_broad_subnet_sets_broad_cover():
     """A /16 supernet covering a /32 host → full_cover=True, broad_cover=True."""
     addr = AddressCatalog(
-        [{"name": "DCFU-10.223.0.0/16", "type": "ipmask", "subnet": "10.223.0.0/16"}],
-        [{"name": "ftnt-firewalls", "member": ["DCFU-10.223.0.0/16"]}],
+        [{"name": "N_10.200.0.0_16", "type": "ipmask", "subnet": "10.200.0.0/16"}],
+        [{"name": "GRP_FIREWALLS", "member": ["N_10.200.0.0_16"]}],
     )
     pol = {
         "policyid": 10, "name": "fw-mgmt", "status": "enable", "action": 1,
-        "srcaddr": ["ftnt-firewalls"], "dstaddr": ["all"], "service": ["ALL"],
+        "srcaddr": ["GRP_FIREWALLS"], "dstaddr": ["all"], "service": ["ALL"],
         "srcintf": ["any"], "dstintf": ["any"], "schedule": ["always"],
     }
     m = PolicyMatcher(addr, ServiceCatalog([], []))
-    result = m.evaluate(pol, "10.223.32.227", "", [WILDCARD_RANGE])
+    result = m.evaluate(pol, "10.200.32.227", "", [WILDCARD_RANGE])
     assert result.matched
     assert result.full_cover
     assert result.broad_cover, (
@@ -668,16 +668,16 @@ def test_broad_subnet_sets_broad_cover():
 def test_exact_host_no_broad_cover():
     """An exact /32 host object → full_cover=True, broad_cover=False."""
     addr = AddressCatalog(
-        [{"name": "H_10.223.32.227", "type": "ipmask", "subnet": "10.223.32.227/32"}],
+        [{"name": "H_10.200.32.227", "type": "ipmask", "subnet": "10.200.32.227/32"}],
         [],
     )
     pol = {
         "policyid": 11, "name": "fw-mgmt-exact", "status": "enable", "action": 1,
-        "srcaddr": ["H_10.223.32.227"], "dstaddr": ["all"], "service": ["ALL"],
+        "srcaddr": ["H_10.200.32.227"], "dstaddr": ["all"], "service": ["ALL"],
         "srcintf": ["any"], "dstintf": ["any"], "schedule": ["always"],
     }
     m = PolicyMatcher(addr, ServiceCatalog([], []))
-    result = m.evaluate(pol, "10.223.32.227", "", [WILDCARD_RANGE])
+    result = m.evaluate(pol, "10.200.32.227", "", [WILDCARD_RANGE])
     assert result.matched
     assert result.full_cover
     assert not result.broad_cover, (
@@ -688,7 +688,7 @@ def test_exact_host_no_broad_cover():
 def test_slash24_boundary_not_broad():
     """A /24 covering network is at the boundary and must NOT set broad_cover."""
     addr = AddressCatalog(
-        [{"name": "NET_24", "type": "ipmask", "subnet": "10.223.32.0/24"}],
+        [{"name": "NET_24", "type": "ipmask", "subnet": "10.200.32.0/24"}],
         [],
     )
     pol = {
@@ -697,6 +697,6 @@ def test_slash24_boundary_not_broad():
         "srcintf": ["any"], "dstintf": ["any"], "schedule": ["always"],
     }
     m = PolicyMatcher(addr, ServiceCatalog([], []))
-    result = m.evaluate(pol, "10.223.32.227", "", [WILDCARD_RANGE])
+    result = m.evaluate(pol, "10.200.32.227", "", [WILDCARD_RANGE])
     assert result.matched and result.full_cover
     assert not result.broad_cover, "/24 is the threshold; broad_cover must be False"
