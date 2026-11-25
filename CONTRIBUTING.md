@@ -65,7 +65,7 @@ and must pass before merge:
 - **`sensitive-string-check`** (`.github/workflows/sensitive-string-check.yml`)
   — this repo is public; blocks any push/PR that reintroduces the redacted
   former employer's name/domain (see `scripts/check-sensitive-strings.sh` —
-  the target strings are stored base64-encoded there, and any match is
+  the blocked words are stored only as SHA-256 hashes there, and any match is
   redacted from the check's own output, so nothing plaintext ever appears in
   a commit, a PR diff, or a CI log)
 

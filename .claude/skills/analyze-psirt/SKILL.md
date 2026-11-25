@@ -65,6 +65,10 @@ returns a compact summary dict plus the rendered HTML as a string:
 - `html_error` — set if rendering failed (call `render_psirt_report` to retry)
 - `verdict_counts` — dict of verdict → device count
 - `total_findings`, `priority`, `priority_rationale`, `kev_hit`, `degraded`, `warnings`
+- `affected_features` — list of feature/service keys detected in the advisory text
+  (e.g. `["ssl_vpn", "radius"]`); empty list means no known features found
+- `feature_exposure_summary` — counts of `active`/`inactive`/`unknown` feature_status
+  across findings where features were checked; empty if no features were detected
 
 ### Step 5 — Write the HTML report locally
 Use the Write tool to save `html_content` to the local workstation:
@@ -88,6 +92,9 @@ values):
 3. **Fleet summary** — `verdict_counts` table and `total_findings`.
    If `verdict_counts` has any `upgrade_required` or `config_change_required`
    entries, also list those specific devices by reading the HTML report.
+   If `affected_features` is non-empty, note which features were detected and
+   summarise `feature_exposure_summary` (e.g. "3 devices have SSL-VPN active,
+   2 inactive") so the engineer understands the feature-exposure context.
 4. **Local HTML report path** — show the path you wrote in Step 5.
 
 ### Step 7 — Re-render (only if Step 4 html_error is set)

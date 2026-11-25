@@ -107,9 +107,6 @@ class FakeFMG:
     def get_global_address_groups(self):
         return []
 
-    def get_central_dnat_rules(self, adom, pkg):
-        return []
-
     def get_service_objects(self, adom):
         return [
             {"name": "HTTPS", "protocol": "TCP/UDP/SCTP", "tcp-portrange": "443"},
@@ -117,6 +114,9 @@ class FakeFMG:
         ]
 
     def get_service_groups(self, adom):
+        return []
+
+    def get_vip_objects(self, adom):
         return []
 
 
@@ -267,7 +267,7 @@ def test_search_devices_bad_connection_status_reports_error():
 def test_get_central_snat_rules_returns_list(mock_fmg_client):
     """get_central_snat_rules returns a list of rule dicts."""
     mock_fmg_client._rpc = lambda method, path, params: [
-        {"id": 1, "orig-addr": ["GE-Peer-165.156.25.6"], "translated-addr": ["ippool-192.234.135.43"]},
+        {"id": 1, "orig-addr": ["VENDOR-Peer-203.0.113.10"], "translated-addr": ["ippool-198.51.100.20"]},
     ]
     result = mock_fmg_client.get_central_snat_rules("TEST-ADOM", "PRODUCTION/DMZ/DMZXFW_Policy")
     assert isinstance(result, list)
@@ -277,11 +277,11 @@ def test_get_central_snat_rules_returns_list(mock_fmg_client):
 def test_get_central_dnat_rules_returns_list(mock_fmg_client):
     """get_central_dnat_rules returns a list of VIP/DNAT rule dicts."""
     mock_fmg_client._rpc = lambda method, path, params: [
-        {"id": 42, "name": "vip-Cherokee-GE-OMS-NAT", "extip": "192.234.135.43", "mappedip": "170.152.57.68"},
+        {"id": 42, "name": "vip-SITE-A-VENDOR-APP-NAT", "extip": "198.51.100.20", "mappedip": "203.0.113.30"},
     ]
     result = mock_fmg_client.get_central_dnat_rules("TEST-ADOM", "PRODUCTION/DMZ/DMZXFW_Policy")
     assert isinstance(result, list)
-    assert result[0]["extip"] == "192.234.135.43"
+    assert result[0]["extip"] == "198.51.100.20"
 
 
 def test_get_central_snat_rules_empty_on_missing_table(mock_fmg_client):

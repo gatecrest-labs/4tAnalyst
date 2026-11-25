@@ -641,13 +641,13 @@ def test_render_report_includes_option_c_when_service_alternative_present():
         "policy": {"cli": "", "name": ""},
         "warnings": [],
         "service_alternative": {
-            "summary": "Extend rule #110223 'GE OMS - VPN passthrough bi' by appending IP-PROTO-47.",
+            "summary": "Extend rule #9001 'VENDOR-APP - VPN passthrough bi' by appending IP-PROTO-47.",
             "package": "PRODUCTION/DMZ/DMZXFW_Policy",
-            "policy_id": 110223,
-            "policy_name": "GE OMS - VPN passthrough bi",
+            "policy_id": 9001,
+            "policy_name": "VENDOR-APP - VPN passthrough bi",
             "services_to_add": ["IP-PROTO-47"],
             "service_cli": (
-                "config firewall policy\n    edit 110223\n"
+                "config firewall policy\n    edit 9001\n"
                 "        append service \"IP-PROTO-47\"\n    next\nend"
             ),
             "warnings": ["Verify IP-PROTO-47 exists as a named service object."],
@@ -656,7 +656,7 @@ def test_render_report_includes_option_c_when_service_alternative_present():
     html = render_report.render_html(payload)
     assert "Option C" in html
     assert "Amend Service" in html
-    assert "110223" in html
+    assert "9001" in html
     assert "IP-PROTO-47" in html
 
 

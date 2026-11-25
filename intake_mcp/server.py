@@ -139,7 +139,7 @@ def parse_manual_entry_tool(fields_json: str) -> dict[str, Any]:
 
         Top-level metadata (all optional, missing ones flagged):
           reference_id         : "RITM0012345" or any identifier
-          rule_owner           : "Alan Wodarski"
+          rule_owner           : "Jordan Example"
           business_contact     : "Jane Smith"
           business_area        : "OT Engineering"
           nuclear_environment  : false
@@ -272,7 +272,7 @@ def describe_template() -> dict[str, Any]:
         },
         "manual_entry_example": {
             "reference_id": "RITM0012345",
-            "rule_owner": "Alan Wodarski",
+            "rule_owner": "Jordan Example",
             "business_contact": "Jane Smith",
             "business_area": "OT Engineering",
             "nuclear_environment": False,

@@ -4,6 +4,90 @@ All notable changes to this project are documented here.
 
 ---
 
+## [Unreleased] — 2026-09-25
+
+### Fixed
+
+#### PSIRT feature exposure checks — code review fixes (`psirt/feature_checks.py`, `psirt/engine.py`, tests)
+
+**Critical:**
+- `_check_dns` — changed `return "inactive"` to `return "unknown"` when both DNS server addresses are `0.0.0.0` or absent. DHCP/PPPoE-assigned DNS produces exactly this state; the device is resolving names but the static config fields are empty. Returning "inactive" could incorrectly downgrade a DNS-advisory verdict to `no_action`.
+
+**Important:**
+- `detect_affected_features` — added `_KEYWORD_RE_OVERRIDE` with a negative lookbehind regex for `VPN` (`(?<![A-Za-z-])\bVPN\b`). Previously `\bVPN\b` matched the "VPN" inside "SSL-VPN" (hyphen is a non-word char, making a valid word boundary), spuriously adding `ipsec` to `affected_features` for pure SSL-VPN advisories.
+- `psirt/engine.py` FortiManager self-evaluation — changed `affected_features=affected_features` to `affected_features=[]` for the FortiManager product path. FortiOS feature checks (SSL-VPN, IPS, etc.) don't apply to FortiManager; passing the full list caused a burst of failing API calls with an invalid device path containing spaces.
+- `psirt/engine.py` advisory text scan — replaced dead code `advisory.title if hasattr(advisory, "title") else ""` (Advisory has no `title` field) with `advisory.workaround_text`, so the advisory's workaround text is also scanned for feature keywords.
+- Engine integration tests — added `_FeatureCheckFMGClient` and 4 end-to-end tests in `test_psirt_engine.py` covering: full feature-inactive downgrade, unknown-does-not-downgrade invariant, active-stays-upgrade-required, no-feature-keywords-skips-checks.
+- Removed stale `test_ntp_returns_unknown_no_check_implemented` (NTP does have a check; test passed for wrong reason and was duplicated by `test_ntp_unknown_when_config_empty`).
+- `test_dns_inactive_when_both_zero` / `test_dns_inactive_when_config_empty` renamed and updated to assert `"unknown"` per the `_check_dns` fix above.
+
+**Minor:**
+- `_check_fortiguard` — added explicit `status == "disable"` → `"inactive"` path; previously the function could never return "inactive", asymmetric with all other global checks.
+- `_check_ips`, `_check_antivirus`, `_check_webfilter`, `_check_app_control` — added NOTE comments explaining the factory-profile limitation (factory profiles are always present; these checks are conservatively true-positive biased and cannot distinguish "applied in a policy" from "exists only").
+- Feature-inactive `no_action` reason string — clarified that the device IS in the affected range but the vulnerable feature is absent, to avoid confusion with the out-of-range `no_action` path.
+- `CLAUDE.md` — added `psirt/feature_checks.py` to the psirt architecture section (was missing).
+- `Changelog.md` — fixed prior entry: `check_feature_exposure(client, adom, device, feature_keys)` → `detect_affected_features(text)` + `check_feature_active(feature_key, client, adom, device)`.
+
+---
+
+## [Unreleased] — 2026-09-08
+
+### Added
+
+#### PSIRT feature exposure checks (`psirt/feature_checks.py`, `fortimanager_mcp/client.py`, `psirt_mcp/server.py`)
+
+Extended the PSIRT assessment engine with deterministic feature-exposure checks: when an advisory targets a specific service/feature, the engine now reads live device config to determine whether each affected device actually runs that service, allowing potential downgrade of `upgrade_required` verdicts to `no_action` when the vulnerable feature is confirmed inactive.
+
+**`psirt/feature_checks.py`** — `detect_affected_features(text)` scans advisory text (description + workaround) with whole-word regex to produce a feature key list. `check_feature_active(feature_key, client, adom, device)` dispatches to the appropriate check function in `_FEATURE_REGISTRY` (now 29 entries) and returns the feature status (active / inactive / unknown). Conservative aggregation: "unknown" never permits downgrade; only all-inactive permits downgrade; any-active means the feature is in use.
+
+**New check functions implemented (13 total this cycle):**
+- Global (non-VDOM): `_check_ntp`, `_check_dns`, `_check_ha`, `_check_fortiguard`, `_check_fgfm`, `_check_vdom`
+- Per-VDOM (iterated across all VDOMs, aggregated): `_check_ips`, `_check_antivirus`, `_check_webfilter`, `_check_app_control`, `_check_two_fa`, `_check_captive_portal`, `_check_lldp`
+- No clean deterministic check (remain `None` in registry): `wad`, `arp`
+
+**`fortimanager_mcp/client.py`** — 11 new read-only methods for feature config reads: `get_ntp_config`, `get_dns_config`, `get_ha_config`, `get_fortiguard_config`, `get_central_management` (global paths); `get_local_users`, `get_user_settings`, `get_ips_sensors`, `get_av_profiles`, `get_webfilter_profiles`, `get_app_sensors` (per-VDOM paths).
+
+**`psirt_mcp/server.py`** — `assess_fleet_exposure` return dict now includes `affected_features` (list of feature keys detected in the advisory) and `feature_exposure_summary` (aggregated active/inactive/unknown counts across findings where features were checked). Docstring updated accordingly.
+
+**`.claude/skills/analyze-psirt/SKILL.md`** — Step 4 return field docs and Step 6 presentation guidance updated to surface `affected_features` and `feature_exposure_summary`.
+
+**Tests** — 40 new tests in `tests/test_psirt_feature_checks.py` covering all 13 new check functions, including exception-path (always returns "unknown") and per-VDOM iteration. Full suite: 92 passing for feature_checks; overall project suite count unchanged from prior run.
+
+---
+
+## [Unreleased] — 2026-09-04
+
+### Added
+
+#### Rule Hygiene fix assessment (`hygiene/`, `hygiene_mcp/`, `.claude/skills/analyze-hygiene/`)
+
+New deterministic rule hygiene fix assessment system. Given a completed FortiManager Rule Hygiene run (JSON or CSV findings export), the `/analyze-hygiene` workflow produces per-finding FortiGate CLI remediation for a single firewall policy package and an HTML report — no auto-remediation, deterministic analysis only.
+
+**`hygiene/` — deterministic core**
+- `models.py` — `Finding`, `FixOption`, `PolicyFix`, `HygieneResult`, `HygieneParseError` (findings text couldn't be parsed), `HygieneDataError` (a data source failed outright, never "no results").
+- `tag.py` — `[HygieneFix YYYY-MM-DD]` / `[HygieneFix EXEMPT YYYY-MM-DD]` traceability tag helpers. Tags are appended to a rule's comment by any fix that disables or annotates it; `find_tag()` recovers the tag date for the `disabled` check's 90-day-age branch.
+- `parse.py` — parses Rule Hygiene findings from pasted/uploaded JSON or CSV, including the scheduled-job CSV export's `#`-comment metadata rows and trailing unused-object sections.
+- `fix_logic.py` — one `_fix_<check>()` deterministic fix generator per Rule Hygiene check (9 total), dispatched via `_FIX_FNS`. Each generator produces `list[FixOption]` against the raw FortiManager policy dict. Checks covered: `unnamed`, `disabled`, `shadow`, `over_permissive`, `redundant`, `expired_schedule`, `unused_object`, `missing_log`, `any_service`.
+- `engine.py` — `assess(findings, live_policies_by_pkg, device, adom, pkg, now=None) -> HygieneResult`. Single entry point: cross-references parsed findings against a live policy package snapshot, runs each applicable fix generator, and segregates stale findings (policy_id no longer present in the live package).
+- `report.py` — stdlib-only HTML report renderer. Zero external dependencies, matching `scripts/render_report.py`'s convention.
+
+**`hygiene_mcp/` — FastMCP wrapper**
+- `parse_hygiene_findings` — validates and parses the calling model's findings input (JSON text, CSV text, or file path); returns a structured findings list or a typed error.
+- `assess_hygiene_fixes` — re-fetches the live policy package for the named ADOM/device/package from FortiManager, runs `hygiene.engine.assess()`, and returns per-finding fix options, stale findings, and the rendered HTML report string. ADOM-guarded (calls `_require_adom`).
+- `render_hygiene_report` — retry-only renderer; called when `assess_hygiene_fixes` returns `html_error`. Takes the assessment struct and re-renders the HTML.
+
+**`fwanalyst_server`** — `parse_hygiene_findings`, `assess_hygiene_fixes`, `render_hygiene_report` registered (total tools: 47).
+
+**`.claude/skills/analyze-hygiene/SKILL.md`** — 6-step engineer workflow: collect findings + scope → `parse_hygiene_findings` → `assess_hygiene_fixes` → write HTML report locally → present stale findings then fix options to engineer → mention `/record-decision`.
+
+**Tests** — 7 new test files covering all layers: `test_hygiene_parse.py`, `test_hygiene_tag.py`, `test_hygiene_models.py`, `test_hygiene_fix_logic.py`, `test_hygiene_engine.py`, `test_hygiene_report.py`, `test_hygiene_mcp.py`. Full suite: 582 passing.
+
+#### `fortimanager_mcp/matching.py` — VIP object resolution in `AddressCatalog`
+
+`AddressCatalog` now accepts a `vip_objects` list (Central DNAT / `firewall/vip` objects) in its constructor. VIPs are stored separately from address objects and resolved via a new `_networks_for_vip()` static method that handles FMG's variable `extip` encoding (single IP, hyphenated range, or list). FortiGate allows VIP names to appear in policy `dstaddr` exactly like normal address objects; without this, any policy line that references a VIP by name resolved to `None` (silent non-match).
+
+---
+
 ## [Unreleased] — 2026-10-31
 
 ### Changed

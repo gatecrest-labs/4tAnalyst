@@ -99,13 +99,13 @@ class FakeFMGClient:
     def get_global_address_groups(self):
         return []
 
-    def get_central_dnat_rules(self, adom, pkg):
-        return []
-
     def get_service_objects(self, adom):
         return []
 
     def get_service_groups(self, adom):
+        return []
+
+    def get_vip_objects(self, adom):
         return []
 
     def get_device_interfaces(self, adom, device):
@@ -330,7 +330,7 @@ _INTERNET_CATALOGUE = {"zones": [
 
 def _unresolved_src_client(policies):
     return FakeZoneClient(
-        results=[{"src": "192.168.40.147", "dst": "10.1.1.7", "service": "tcp/443",
+        results=[{"src": "192.168.100.10", "dst": "10.1.1.7", "service": "tcp/443",
                   "verdict": "UNKNOWN", "src_zones": [],
                   "dst_zones": ["Internal-Wifi"], "governing": [],
                   "all_policies": []}],
@@ -344,7 +344,7 @@ def test_unresolved_ip_defaults_to_internet_zone_and_reevaluates():
         {"policy_set": "Corp", "from_zone": "Internet", "to_zone": "Internal-Wifi",
          "access_type": "block only", "services": ["telnet"], "severity": "high"},
     ])
-    v = fetch_zone_verdict(zc, "192.168.40.147", "10.1.1.7", "tcp/443")
+    v = fetch_zone_verdict(zc, "192.168.100.10", "10.1.1.7", "tcp/443")
     assert v["src_zones"] == ["Internet"]
     assert v["verdict"] == "ALLOWED"      # block-only telnet → 443 permitted
     assert v["governing"]
@@ -356,20 +356,20 @@ def test_unresolved_ip_internet_default_can_block():
         {"policy_set": "Corp", "from_zone": "Internet", "to_zone": "Internal-Wifi",
          "access_type": "block all", "services": [], "severity": "critical"},
     ])
-    v = fetch_zone_verdict(zc, "192.168.40.147", "10.1.1.7", "tcp/443")
+    v = fetch_zone_verdict(zc, "192.168.100.10", "10.1.1.7", "tcp/443")
     assert v["verdict"] == "BLOCKED"
 
 
 def test_unresolved_ip_stays_unknown_without_internet_zone():
     zc = FakeZoneClient(
-        results=[{"src": "192.168.40.147", "dst": "10.1.1.7", "service": "tcp/443",
+        results=[{"src": "192.168.100.10", "dst": "10.1.1.7", "service": "tcp/443",
                   "verdict": "UNKNOWN", "src_zones": [],
                   "dst_zones": ["Internal-Wifi"], "governing": [],
                   "all_policies": []}],
         zones={"zones": [{"name": "Internal-Wifi", "domain": "Default",
                           "subnets": [{"subnet": "10.1.1.0/24"}]}]},
     )
-    v = fetch_zone_verdict(zc, "192.168.40.147", "10.1.1.7", "tcp/443")
+    v = fetch_zone_verdict(zc, "192.168.100.10", "10.1.1.7", "tcp/443")
     assert v["verdict"] == "UNKNOWN"
     assert v["src_zones"] == []
     assert any("no 'Internet' zone" in n for n in v["notes"])
@@ -377,7 +377,7 @@ def test_unresolved_ip_stays_unknown_without_internet_zone():
 
 def test_unresolved_ip_no_governing_policy_stays_unknown():
     zc = _unresolved_src_client([])
-    v = fetch_zone_verdict(zc, "192.168.40.147", "10.1.1.7", "tcp/443")
+    v = fetch_zone_verdict(zc, "192.168.100.10", "10.1.1.7", "tcp/443")
     assert v["src_zones"] == ["Internet"]
     assert v["verdict"] == "UNKNOWN"
 
@@ -459,9 +459,6 @@ class EngineFMG:
     def get_global_address_groups(self):
         return []
 
-    def get_central_dnat_rules(self, adom, pkg):
-        return []
-
     def get_service_objects(self, adom):
         return [
             {"name": "HTTPS", "protocol": "TCP/UDP/SCTP", "tcp-portrange": "443"},
@@ -470,6 +467,9 @@ class EngineFMG:
         ]
 
     def get_service_groups(self, adom):
+        return []
+
+    def get_vip_objects(self, adom):
         return []
 
     def get_device_interfaces(self, adom, device):
@@ -627,7 +627,7 @@ def test_device_not_found_flagged():
 def test_broad_subnet_already_covered_warns():
     """Coverage via /16 supernet alone must produce new_rule, not already_covered.
 
-    The source 10.223.32.227 is contained in BROAD_GRP (→ 10.223.0.0/16) but
+    The source 10.200.32.227 is contained in BROAD_GRP (→ 10.200.0.0/16) but
     has no explicit /32 object.  Broad-subnet coverage must not close the ticket
     — the engineer must add the host explicitly or create a new rule.
     """
@@ -645,7 +645,7 @@ def test_broad_subnet_already_covered_warns():
 
         def get_address_objects(self, adom):
             return [
-                {"name": "NET_BROAD", "type": "ipmask", "subnet": "10.223.0.0/16"},
+                {"name": "NET_BROAD", "type": "ipmask", "subnet": "10.200.0.0/16"},
                 {"name": "NET_DST", "type": "ipmask", "subnet": "10.9.8.0/24"},
             ]
 
@@ -653,7 +653,7 @@ def test_broad_subnet_already_covered_warns():
             return [{"name": "BROAD_GRP", "member": ["NET_BROAD"]}]
 
     plan = plan_change(
-        src="10.223.32.227", dst="10.9.8.7", service="443",
+        src="10.200.32.227", dst="10.9.8.7", service="443",
         firewalls=[TF(device="FW1", adom="root")],
         justification="broad subnet regression", ticket_id="CHG_BROAD",
         fmg_client=BroadFMG(),
@@ -669,9 +669,9 @@ def test_broad_subnet_already_covered_warns():
 
 
 def test_broad_only_coverage_requires_new_rule():
-    """Real-world regression: ftnt-firewalls (/16) in rule; ftnt-firewalls_0 (/19) not in rule.
+    """Real-world regression: GRP_FIREWALLS (/16) in rule; GRP_FIREWALLS_0 (/19) not in rule.
 
-    Source 10.223.32.227 falls in both subnets, but only via the broad /16
+    Source 10.200.32.227 falls in both subnets, but only via the broad /16
     through the rule's actual srcaddr group.  Ticket must NOT be closed as
     already_covered — a new explicit rule is required.
     """
@@ -679,7 +679,7 @@ def test_broad_only_coverage_requires_new_rule():
         {
             "policyid": 10104, "name": "FortiGate Firewalls to FortiManager",
             "status": "enable", "action": 1, "schedule": ["always"],
-            "srcaddr": ["ftnt-firewalls"], "dstaddr": ["all"], "service": ["ALL"],
+            "srcaddr": ["GRP_FIREWALLS"], "dstaddr": ["all"], "service": ["ALL"],
             "srcintf": ["any"], "dstintf": ["any"],
         },
     ]
@@ -690,26 +690,26 @@ def test_broad_only_coverage_requires_new_rule():
 
         def get_address_objects(self, adom):
             return [
-                {"name": "NET_BROAD",    "type": "ipmask", "subnet": "10.223.0.0/16"},
-                {"name": "NET_SPECIFIC", "type": "ipmask", "subnet": "10.223.32.0/19"},
+                {"name": "NET_BROAD",    "type": "ipmask", "subnet": "10.200.0.0/16"},
+                {"name": "NET_SPECIFIC", "type": "ipmask", "subnet": "10.200.32.0/19"},
             ]
 
         def get_address_groups(self, adom):
             return [
-                {"name": "ftnt-firewalls",   "member": ["NET_BROAD"]},
-                {"name": "ftnt-firewalls_0", "member": ["NET_SPECIFIC"]},
+                {"name": "GRP_FIREWALLS",   "member": ["NET_BROAD"]},
+                {"name": "GRP_FIREWALLS_0", "member": ["NET_SPECIFIC"]},
             ]
 
     plan = plan_change(
-        src="10.223.32.227", dst="10.9.8.7", service="443",
+        src="10.200.32.227", dst="10.9.8.7", service="443",
         firewalls=[TF(device="FW1", adom="root")],
-        justification="ftnt-firewalls broad regression", ticket_id="CHG_BROAD2",
+        justification="GRP_FIREWALLS broad regression", ticket_id="CHG_BROAD2",
         fmg_client=BroadRealFMG(),
         zone_client=EngineZone(),
     )
     fw = plan.firewalls[0]
     assert fw.status == "new_rule", (
-        "Coverage only via a /16 supernet (ftnt-firewalls) must not close the "
+        "Coverage only via a /16 supernet (GRP_FIREWALLS) must not close the "
         "ticket — expected new_rule"
     )
     assert any("broad" in w.lower() for w in fw.warnings), (
@@ -1311,11 +1311,11 @@ def test_service_plan_wildcard_still_maps_to_all(fake_snapshot):
 # ---------------------------------------------------------------------------
 
 def _fake_fmg_with_partial_svc_rule():
-    """Fake FMG with rule 110223 that covers src/dst but has only HTTPS (not ip/47)."""
+    """Fake FMG with rule 9001 that covers src/dst but has only HTTPS (not ip/47)."""
     policies = [
-        {"policyid": 110223, "name": "GE OMS - VPN passthrough bi",
+        {"policyid": 9001, "name": "VENDOR-APP - VPN passthrough bi",
          "status": "enable", "action": 1, "schedule": ["always"],
-         "srcaddr": ["H_GE_SRC"], "dstaddr": ["H_GE_DST"],
+         "srcaddr": ["H_VENDOR_SRC"], "dstaddr": ["H_VENDOR_DST"],
          "service": ["HTTPS"],
          "srcintf": ["any"], "dstintf": ["any"], "logtraffic": 2},
     ]
@@ -1328,18 +1328,18 @@ def _fake_fmg_with_partial_svc_rule():
         {"name": "pkgA", "scope member": [{"name": "FW01"}]}
     ]
     fmg.get_address_objects = lambda adom: base + [
-        {"name": "H_GE_SRC", "type": "ipmask", "subnet": "165.156.25.6/32"},
-        {"name": "H_GE_DST", "type": "ipmask", "subnet": "170.152.57.68/32"},
+        {"name": "H_VENDOR_SRC", "type": "ipmask", "subnet": "203.0.113.10/32"},
+        {"name": "H_VENDOR_DST", "type": "ipmask", "subnet": "203.0.113.30/32"},
     ]
     return fmg
 
 
 def _fake_fmg_with_both_gaps():
-    """Fake FMG with rule that covers dst 170.152.57.68 but NOT src 1.2.3.4 and not ip/47."""
+    """Fake FMG with rule that covers dst 203.0.113.30 but NOT src 1.2.3.4 and not ip/47."""
     policies = [
-        {"policyid": 110224, "name": "GE OMS - partial",
+        {"policyid": 9002, "name": "VENDOR-APP - partial",
          "status": "enable", "action": 1, "schedule": ["always"],
-         "srcaddr": ["H_GE_DST"], "dstaddr": ["H_GE_DST"],
+         "srcaddr": ["H_VENDOR_DST"], "dstaddr": ["H_VENDOR_DST"],
          "service": ["HTTPS"],
          "srcintf": ["any"], "dstintf": ["any"], "logtraffic": 2},
     ]
@@ -1350,7 +1350,7 @@ def _fake_fmg_with_both_gaps():
         {"name": "pkgA", "scope member": [{"name": "FW01"}]}
     ]
     fmg.get_address_objects = lambda adom: base + [
-        {"name": "H_GE_DST", "type": "ipmask", "subnet": "170.152.57.68/32"},
+        {"name": "H_VENDOR_DST", "type": "ipmask", "subnet": "203.0.113.30/32"},
     ]
     return fmg
 
@@ -1364,7 +1364,7 @@ def _fake_fmg_with_negated_dst_rule():
     policies = [
         {"policyid": 99999, "name": "Wind Farms catch-all",
          "status": "enable", "action": 1, "schedule": ["always"],
-         "srcaddr": ["H_GE_SRC"], "dstaddr": ["H_GE_DST"],
+         "srcaddr": ["H_VENDOR_SRC"], "dstaddr": ["H_VENDOR_DST"],
          "dstaddr-negate": "enable",
          "service": ["HTTPS"],
          "srcintf": ["any"], "dstintf": ["any"], "logtraffic": 2},
@@ -1376,8 +1376,8 @@ def _fake_fmg_with_negated_dst_rule():
         {"name": "pkgA", "scope member": [{"name": "FW01"}]}
     ]
     fmg.get_address_objects = lambda adom: base + [
-        {"name": "H_GE_SRC", "type": "ipmask", "subnet": "10.1.2.3/32"},
-        {"name": "H_GE_DST", "type": "ipmask", "subnet": "10.9.8.7/32"},
+        {"name": "H_VENDOR_SRC", "type": "ipmask", "subnet": "10.1.2.3/32"},
+        {"name": "H_VENDOR_DST", "type": "ipmask", "subnet": "10.9.8.7/32"},
     ]
     return fmg
 
@@ -1408,7 +1408,7 @@ def _fake_fmg_with_negated_src_rule():
     policies = [
         {"policyid": 99997, "name": "negated-src-catch-all",
          "status": "enable", "action": 1, "schedule": ["always"],
-         "srcaddr": ["H_GE_SRC"],
+         "srcaddr": ["H_VENDOR_SRC"],
          "srcaddr-negate": "enable",
          "dstaddr": ["GRP_NEG_DST"],
          "service": ["HTTPS"],
@@ -1421,11 +1421,11 @@ def _fake_fmg_with_negated_src_rule():
         {"name": "pkgA", "scope member": [{"name": "FW01"}]}
     ]
     fmg.get_address_objects = lambda adom: base + [
-        {"name": "H_GE_SRC", "type": "ipmask", "subnet": "10.1.2.3/32"},
-        {"name": "H_GE_DST2", "type": "ipmask", "subnet": "10.9.8.7/32"},
+        {"name": "H_VENDOR_SRC", "type": "ipmask", "subnet": "10.1.2.3/32"},
+        {"name": "H_VENDOR_DST2", "type": "ipmask", "subnet": "10.9.8.7/32"},
     ]
     fmg.get_address_groups = lambda adom: [
-        {"name": "GRP_NEG_DST", "member": [{"name": "H_GE_DST2"}]},
+        {"name": "GRP_NEG_DST", "member": [{"name": "H_VENDOR_DST2"}]},
     ]
     return fmg
 
@@ -1467,7 +1467,7 @@ def test_service_append_alternative_found_when_address_covered_service_missing()
     fmg = _fake_fmg_with_partial_svc_rule()
     zc = EngineZone(verdict="ALLOWED")
     plan = plan_change(
-        src="165.156.25.6", dst="170.152.57.68",
+        src="203.0.113.10", dst="203.0.113.30",
         service="ip/47",
         firewalls=[TF(device="FW01", adom="TEST-ADOM")],
         ticket_id="RITM-TEST",
@@ -1475,10 +1475,10 @@ def test_service_append_alternative_found_when_address_covered_service_missing()
     )
     fw = plan.firewalls[0]
     assert fw.service_alternative is not None
-    assert fw.service_alternative.policy_id == 110223
-    assert fw.service_alternative.policy_name == "GE OMS - VPN passthrough bi"
+    assert fw.service_alternative.policy_id == 9001
+    assert fw.service_alternative.policy_name == "VENDOR-APP - VPN passthrough bi"
     assert "IP-PROTO-47" in fw.service_alternative.services_to_add
-    assert "110223" in fw.service_alternative.service_cli
+    assert "9001" in fw.service_alternative.service_cli
 
 
 def test_service_append_alternative_absent_when_address_gap_exists():
@@ -1486,7 +1486,7 @@ def test_service_append_alternative_absent_when_address_gap_exists():
     fmg = _fake_fmg_with_both_gaps()
     zc = EngineZone(verdict="ALLOWED")
     plan = plan_change(
-        src="1.2.3.4", dst="170.152.57.68",
+        src="1.2.3.4", dst="203.0.113.30",
         service="ip/47",
         firewalls=[TF(device="FW01", adom="TEST-ADOM")],
         ticket_id="RITM-TEST2",
@@ -1501,12 +1501,12 @@ def test_service_alternative_in_report_payload():
     from planner.models import FirewallPlan, ServiceAppendAlternative
     svc_alt = ServiceAppendAlternative(
         package="TEST/pkg",
-        policy_id=110223,
-        policy_name="GE OMS - VPN passthrough bi",
+        policy_id=9001,
+        policy_name="VENDOR-APP - VPN passthrough bi",
         services_to_add=["IP-PROTO-47"],
         service_cli=(
             "config firewall policy\n"
-            "    edit 110223\n"
+            "    edit 9001\n"
             '        append service "IP-PROTO-47"\n'
             "    next\n"
             "end"
@@ -1518,6 +1518,6 @@ def test_service_alternative_in_report_payload():
     payload = to_report_payload(plan)
     fw_entry = payload["cli"]["per_firewall"][0]
     assert fw_entry.get("service_alternative") is not None
-    assert fw_entry["service_alternative"]["policy_id"] == 110223
+    assert fw_entry["service_alternative"]["policy_id"] == 9001
     assert fw_entry["service_alternative"]["services_to_add"] == ["IP-PROTO-47"]
-    assert "110223" in fw_entry["service_alternative"]["summary"]
+    assert "9001" in fw_entry["service_alternative"]["summary"]

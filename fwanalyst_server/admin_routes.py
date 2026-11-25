@@ -374,9 +374,12 @@ def create_router(
                 return JSONResponse({"error": "unauthorized"}, status_code=401)
 
         ip_address = request.client.host if request.client else None
-        body = await request.json()
-        input_tokens = int(body.get("input_tokens", 0))
-        output_tokens = int(body.get("output_tokens", 0))
+        try:
+            body = await request.json()
+            input_tokens = int(body.get("input_tokens", 0))
+            output_tokens = int(body.get("output_tokens", 0))
+        except (ValueError, TypeError, AttributeError):
+            return JSONResponse({"error": "invalid request body"}, status_code=400)
         model = body.get("model") or "default"
         price_key = model if model in pricing else "default"
         price = pricing.get(price_key, {})

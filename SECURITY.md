@@ -51,30 +51,17 @@ Until then, cross-reference recorded decisions against ServiceNow ticket history
 2. Ensure any filed documents are attested by a named human reviewer, not presented as AI-generated outputs.
 3. Do not treat `review_requirements.yaml` approval chain values as authoritative until they have been validated and signed off by the compliance team.
 
-## Sensitive data in this repository
+## Data in this repository
 
-This repository may be made public. A named reviewer must sign off on each item below before any merge to a public branch. Do not publish without completing this checklist.
+This repository ships placeholder data only. Hostnames, ADOM names, device names and zone names in the
+code, tests, docs and `*.example` files are fictional or generic (public vendor domains appear only as
+FQDN examples). IPs are private (RFC 1918), documentation (RFC 5737) or well-known public addresses. Site-specific files stay local and are gitignored: `credentials.yaml`, `device_zone_map.yaml`,
+`standards_mcp/naming.local.yaml`, `standards_mcp/policy_db.json` and `standards_mcp/policy-data/`. Build
+your own from the `.example` templates and `python standards_mcp/build_policy_db.py`.
 
-**2026-07-25 remediation:** `credentials.yaml`, `policy_db.json`, and `fmg-test.md`'s pre-scrub content
-were confirmed/purged from full git history via `git filter-repo` (path removal + literal-string
-replacement), followed by a force-push. `standards_mcp/policy_db.json` and `standards_mcp/policy-data/`
-(the source CSVs behind it) are now gitignored and untracked — this repo ships no real segmentation
-data; generate your own locally with `python standards_mcp/build_policy_db.py` against your own CSV
-exports. `docs/test-results/`, `.claude/worktrees/`, `.claude/settings.json` (hardcoded a personal
-machine path), and `docs/superpowers/` (internal planning docs reusing lab IPs) were also untracked.
-Real hostnames/IPs found in `todo.md`, `standards_mcp/naming.yaml`, `CLAUDE.md`, and `zone_mcp/*.py`
-were replaced with placeholders repo-wide, including in history.
-
-| File | Risk | Status |
-|---|---|---|
-| `credentials.yaml` | API keys | Never committed — confirmed via `git log --all --full-history -- credentials.yaml` |
-| `todo.md` | Contained production VM/FortiManager IPs and hostnames | Scrubbed at HEAD and in history (2026-07-25) |
-| `standards_mcp/naming.yaml` | Internal zone abbreviations (OT, CIP-H, GAS-SCADA, etc.) reveal internal network segmentation vocabulary | **Still open** — terminology itself (not a leaked value) remains; review with security team before publishing |
-| `standards_mcp/review_requirements.yaml` | Internal role names and approval chain structure | **Still open** — review with compliance team before publishing |
-| `docs/architecture.md` | Describes internal topology, port assignments, and component roles | **Still open** — review for internal-specific detail |
-| `highlevel-4tanalyst.md` | Full architecture description with OT/IT/CIP segmentation details | **Still open** — review or exclude from public repo |
-| `standards_mcp/policy_db.json`, `standards_mcp/policy-data/` | Real internal subnets, site names, and zone topology | Untracked, gitignored, and purged from git history (2026-07-25) |
-| `fmg-test.md` | Pre-scrub version had real hosts/IPs at commit `d2a2015` | Purged from git history (2026-07-25) |
+Before contributing, keep real environment details out of commits, including test fixtures and commit
+metadata. `scripts/check-sensitive-strings.sh` (run in CI and by the `.githooks/pre-commit` hook) blocks a
+list of known strings.
 
 ## Issuing engineer tokens
 

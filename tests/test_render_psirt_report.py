@@ -78,3 +78,69 @@ def test_render_psirt_html_flags_kev_hit():
 def test_render_psirt_html_lists_out_of_scope_products():
     html = render_psirt_html(_payload())
     assert "FortiAP" in html
+
+
+def test_render_psirt_html_shows_feature_section_when_features_present():
+    payload = _payload(affected_features=["ssl_vpn", "ztna"])
+    html = render_psirt_html(payload)
+    assert "Affected Services / Features" in html
+    assert "SSL-VPN" in html
+    assert "ZTNA" in html
+    assert "Features" in html  # table header column added
+
+
+def test_render_psirt_html_no_feature_section_when_features_empty():
+    payload = _payload(affected_features=[])
+    html = render_psirt_html(payload)
+    assert "Affected Services / Features" not in html
+    # Features column header still present (always shown for layout consistency)
+    assert "Features" in html
+
+
+def test_render_psirt_html_feature_column_not_exposed_badge():
+    payload = _payload(
+        affected_features=["ssl_vpn"],
+        findings=[{
+            "device": "FW01", "adom": "OT-ADOM", "product": "FortiOS",
+            "current_version": "7.4.2", "in_range": True,
+            "workaround_status": "not_applicable", "verdict": "no_action",
+            "reason": "Feature inactive.",
+            "feature_status": "inactive",
+            "features_checked": ["ssl_vpn"],
+        }],
+    )
+    html = render_psirt_html(payload)
+    assert "Not exposed" in html
+    assert "feat-not-exposed" in html
+
+
+def test_render_psirt_html_feature_column_exposed_badge():
+    payload = _payload(
+        affected_features=["ssl_vpn"],
+        findings=[{
+            "device": "FW01", "adom": "OT-ADOM", "product": "FortiOS",
+            "current_version": "7.4.2", "in_range": True,
+            "workaround_status": "not_in_place", "verdict": "upgrade_required",
+            "reason": "Feature active.",
+            "feature_status": "active",
+            "features_checked": ["ssl_vpn"],
+        }],
+    )
+    html = render_psirt_html(payload)
+    assert "Exposed" in html
+    assert "feat-exposed" in html
+
+
+def test_render_psirt_html_feature_column_dash_when_not_checked():
+    # Out-of-range device (features_checked is absent/empty) — cell should be "—"
+    payload = _payload(
+        affected_features=["ssl_vpn"],
+        findings=[{
+            "device": "FW99", "adom": "OT-ADOM", "product": "FortiOS",
+            "current_version": "7.6.0", "in_range": False,
+            "workaround_status": "not_applicable", "verdict": "no_action",
+            "reason": "Out of range.",
+        }],
+    )
+    html = render_psirt_html(payload)
+    assert "—" in html
