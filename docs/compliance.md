@@ -36,6 +36,10 @@ When Claude Code calls an MCP tool (e.g., zone_mcp to resolve an IP, fortimanage
 - Rule names, descriptions, and object names returned from FortiManager
 - Any subnet or IP data returned by those tools
 
+### Policy-export review (`/sanitize-policy`, `/review-policy`)
+
+A Rule Review policy export never leaves the workstation in raw form. The engineer renames it to a neutral `export-*.json` name, and the offline `policy_sanitize` tool replaces IPs, hostnames, and configured company/site terms with consistent fakes locally; a fail-closed verifier blocks the output if any original value remains. Only the sanitized copy is read by the model. The real-to-fake map stays on the workstation (`~/.local/share/4tanalyst/sanitize/`, mode 0600, refused in synced folders, expires after 30 days) and is never sent to the model. Restoring real values (`map-back`) is a local step whose output must not be pasted back into Claude. Residual exposure: rule structure, service names, and meaning words in object names (for example OT, DMZ) are kept so the review is useful; terms the engineer did not list may survive, which the `unmatched-identifiers` count and `--strict` mode are designed to catch.
+
 **What does NOT leave the internal network:** Firewall credentials, API keys, and direct API traffic between the MCP servers and FortiManager. Those calls happen entirely on the central MCP server. Engineer workstations never connect directly to firewall management APIs.
 
 ---

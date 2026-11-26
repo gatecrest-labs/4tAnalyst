@@ -4,6 +4,56 @@ All notable changes to this project are documented here.
 
 ---
 
+## [Unreleased] — 2026-11-25
+
+### Added
+
+#### Offline policy-export sanitizer (`policy_sanitize/`)
+
+New stdlib-only package that sanitizes a Rule Review policy JSON export on the engineer's workstation so an AI review never sees real identifiers.
+
+- `uv run python -m policy_sanitize sanitize --input … --out-dir … [--terms PATH | --no-terms] [--strict]` — keyed, prefix-preserving remap of private IPv4 (RFC 1918 ranges into disjoint reserved blocks, subnet structure kept); public IPv4 allocated sequentially from a fake pool (equality only); IPv6 literals replaced with sequential `2001:db8::` fakes; FQDNs replaced with `host-NNN.example.test`; terms from `~/.config/4tanalyst/sanitize-terms.txt` replaced with `ORG` / `SITE-n` placeholders; rule comments dropped; package/ADOM names become `PKG-n` / `ADOM-n`.
+- Fail-closed verifier: every original value (including alternate IP spellings) is searched for in the output; any hit means exit 3 and nothing is written. Violations report JSON paths only, never values.
+- `unmatched-identifiers` safety net: counts letter+digit identifiers (for example device names) left in the output that no term covered; `--strict` refuses to write (exit 4) while any remain.
+- Local map store (`~/.local/share/4tanalyst/sanitize/`, override with `FW_ANALYST_SANITIZE_DIR`): mode 0600 files in a 0700 directory, refused inside the repo or any synced folder, expires after 30 days. `map-back` restores real values into a report locally (output refused inside the repo or a synced folder); `purge` deletes expired maps.
+- `render-review --input FINDINGS.json --out-dir DIR` — validates `/review-policy` findings and writes a self-contained HTML report (`policy-review-<run-id>.html`, mode 0600, atomic write): inline CSS only, no JavaScript, no external resources, Content-Security-Policy meta tag, every value HTML-escaped, severity-ranked sections with counts, mandatory scope limits, and fix text that looks like FortiGate CLI is rejected.
+- Error output is fixed text plus an exception class name — never file contents, argument values, or tracebacks.
+
+#### New skills `/sanitize-policy` and `/review-policy`
+
+- `/sanitize-policy` runs the sanitizer and relays only its summary lines. Claude never reads, prints, moves, or renames the raw export; the engineer saves it under `~/policy-exports/` and renames it to a neutral `export-<anything>.json` name first (the original file name carries the real package name). Sanitized files go to `~/policy-sanitized/`.
+- `/review-policy` accepts only `sanitized-<16 hex>-<N>.json` paths (resolved, no `..` or symlinks, never under the export, map, or config directories), reads only that file, writes only `output/policy-review/<run-id>.findings.json`, and runs only the `render-review` command. The deliverable is `output/policy-review/policy-review-<run-id>.html`. File contents are treated as untrusted data; fixes are prose only.
+- Recommended user-level deny rules: `Read(~/policy-exports/**)`, `Read(~/.local/share/4tanalyst/**)`, `Read(~/.config/4tanalyst/**)`, `Read(~/policy-mapped/**)`.
+
+### Fixed
+
+#### `policy_sanitize` — final-review hardening
+
+- Raw export file name: neutral `export-*.json` rule; the skill stops without repeating the original name.
+- FQDNs with any alphabetic top-level label (not just a fixed TLD list) are replaced; common file extensions are exempt.
+- IPv6 literals are replaced, verified, and mapped back.
+- Terms of 4+ characters now match as case-insensitive substrings inside longer words, in both the scrubber and the verifier; shorter terms stay whole-token.
+- Short device-style identifiers are now counted by `unmatched-identifiers`.
+- `/review-policy` path validation and explicit tool limits; deny rules extended to the map and config directories.
+- CLI serializes every document before writing and removes all outputs and the stored map if any write fails.
+- Map directory permissions are only tightened on directories the tool created; more synced-storage locations are refused; stored maps are shape-validated on read.
+- A CIDR wider than its private block maps through the public pool; two originals that would share one fake fail closed.
+
+#### `policy_sanitize` — second review pass
+
+- `--strict` no longer fails on ordinary exports: `srcintf`/`dstintf` values are still scrubbed but not counted as unmatched identifiers, and generic interface-name shapes (`port1`, `wan1`, `VLAN100`, `npu0_vlink0`, `loopback0`, …) are exempt everywhere. A realistic synthetic fixture now passes `--strict`.
+- Host-with-prefix object names (`10.1.1.7/24`, `H_10.1.1.7_22`) map the address itself (prefix text kept, still inside the fake network) instead of colliding with the network's fake; the collision check remains only as an internal fail-closed assertion with a fixed message.
+- FQDN matches extend over a `_`-joined stem (`scada_01.plant.ca` is replaced and recorded whole).
+- The verifier ignores term matches inside the tool's own placeholders (`host-NNN.example.test`, `SITE-n`, `ORG`, `PKG-n`, `ADOM-n`, `2001:db8::n`), so terms like `host` or `site` no longer force exit 3.
+- Fourth recommended deny rule `Read(~/policy-mapped/**)`; both skills refuse paths under `~/policy-mapped/` (map-back output with real values).
+
+#### `policy_sanitize` — third review pass
+
+- Host-with-prefix addresses now use `IpMapper.map_host_in_net`: the network part comes from the network's own fake and the host bits go through a keyed bijection that maps zero to zero, so a host can never land on its network's fake under any key (previously `/31`, `/30` and occasionally `/24` pairs could still collide). Tests run across 300 random keys.
+- FQDN labels may contain underscores anywhere (`_scada_01.plant.ca`, `scada.db_hmi.plant.ca` are replaced and recorded whole).
+
+---
+
 ## [Unreleased] — 2026-09-25
 
 ### Fixed

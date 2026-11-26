@@ -87,7 +87,7 @@ That's expected. `review_requirements.yaml` captures required *roles* (e.g., "Ne
 
 **Where do the generated report files go?**
 
-`report.html` and `implementation.conf` are saved under `output/<ticket-id>/` in your local checkout (or a timestamped folder if you haven't set a ticket ID). The `output/` directory is gitignored — files there are never committed to the repo. PSIRT reports go to `output/PSIRT/<advisory-id>/`; hygiene reports go to `output/hygiene/`.
+`report.html` and `implementation.conf` are saved under `output/<ticket-id>/` in your local checkout (or a timestamped folder if you haven't set a ticket ID). The `output/` directory is gitignored — files there are never committed to the repo. PSIRT reports go to `output/PSIRT/<advisory-id>/`; hygiene reports go to `output/hygiene/`; policy-review reports go to `output/policy-review/policy-review-<run-id>.html`.
 
 **Should I attach the `implementation.conf` file to my change ticket?**
 
@@ -120,6 +120,22 @@ Run `/analyze-hygiene` after exporting findings from the FortiManager Rule Hygie
 **What are "stale findings"?**
 
 A finding is stale when the `policy_id` from the hygiene export no longer exists in the live policy package fetched from FortiManager. This usually means the rule was already fixed or deleted since the hygiene run. Stale findings are listed separately at the top of the output. Verify manually that the rule was intentionally removed before treating them as resolved.
+
+---
+
+## Policy export review
+
+**Can I get an AI review of a whole policy package without sending real IPs and names to the model?**
+
+Yes. Save the Rule Review JSON export under `~/policy-exports/`, rename it yourself to `export-<anything>.json`, then run `/sanitize-policy` followed by `/review-policy`. The offline `policy_sanitize` tool replaces IPs, hostnames, and the company/site terms in your terms file with consistent fakes on your workstation; only the sanitized copy is read by Claude. See `docs/usage.md`.
+
+**Why do I have to rename the export?**
+
+4thealth names the file after the real policy package, so the file name itself would reveal it once you type the path. `/sanitize-policy` stops if the name is not `export-<anything>.json`. Rename it yourself — Claude will not move or rename it.
+
+**How do I see real names in the review?**
+
+Run `uv run python -m policy_sanitize map-back --run-id <run-id> --input output/policy-review/policy-review-<run-id>.html --output ~/policy-mapped/policy-review-<run-id>.html` yourself. The mapped copy contains real values: open it in a browser, never paste it into Claude. Maps expire after 30 days (`uv run python -m policy_sanitize purge` cleans them up).
 
 ---
 

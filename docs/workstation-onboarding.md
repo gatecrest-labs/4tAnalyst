@@ -11,8 +11,10 @@ A sparse checkout pulls down only the slash commands and the local report-render
 ```bash
 git clone --filter=blob:none --sparse <repo-url> 4tAnalyst-workstation
 cd 4tAnalyst-workstation
-git sparse-checkout set .claude scripts
+git sparse-checkout set .claude scripts policy_sanitize
 ```
+
+`policy_sanitize` is only needed for `/sanitize-policy` / `/review-policy`; it is stdlib-only and runs with `uv run python -m policy_sanitize …` from the checkout root (requires Python 3.11+ and [uv](https://docs.astral.sh/uv/) on the laptop).
 
 Root-level files (including `.mcp.json.example`) are always included automatically in cone mode.
 
@@ -123,6 +125,10 @@ Once connected, `docs/engineer-workflow.md` §2 walks through working an actual 
 | `/record-decision` | Logs the approved/rejected/deferred outcome to the audit store |
 | `/analyze-psirt` | Assess a Fortinet PSIRT advisory against the live fleet — per-device verdict + HTML report |
 | `/analyze-hygiene` | Turn a Rule Hygiene findings export into per-finding FortiGate CLI remediation + HTML report |
+| `/sanitize-policy` | Sanitize a Rule Review policy export locally (raw file never read by Claude; rename it to `export-<anything>.json` first) |
+| `/review-policy` | Ranked risk review of a sanitized export → `output/policy-review/policy-review-<run-id>.html` |
+
+If you use `/sanitize-policy`, add these deny rules to your own `~/.claude/settings.json` under `permissions.deny`: `Read(~/policy-exports/**)`, `Read(~/.local/share/4tanalyst/**)`, `Read(~/.config/4tanalyst/**)`, `Read(~/policy-mapped/**)` (the last protects map-back output, which holds real values).
 
 ---
 

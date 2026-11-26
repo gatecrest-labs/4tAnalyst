@@ -251,7 +251,7 @@ sudo -u 4tanalyst bash -c "
 
 ## Engineer workstations
 
-Engineers need only Claude Code — no Python, no API credentials, no local server.
+Engineers need only Claude Code — no API credentials, no local server. Python 3.11+ and uv are needed only for the local `/sanitize-policy` workflow (the stdlib-only `policy_sanitize` package).
 
 ### 1. Install Claude Code
 
@@ -262,8 +262,10 @@ Download from [claude.ai/code](https://claude.ai/code). Available for macOS, Win
 ```bash
 git clone --filter=blob:none --sparse <repo-url> 4tAnalyst-workstation
 cd 4tAnalyst-workstation
-git sparse-checkout set .claude scripts .mcp.json.example
+git sparse-checkout set .claude scripts policy_sanitize .mcp.json.example
 ```
+
+`policy_sanitize` is only needed for `/sanitize-policy` / `/review-policy` and runs as `uv run python -m policy_sanitize …` from the checkout root.
 
 ### 3. Configure MCP server connections
 

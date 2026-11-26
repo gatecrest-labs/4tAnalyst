@@ -1,0 +1,188 @@
+{
+  "package": "acme_pkg_realistic",
+  "adom": "acme-adom",
+  "generated": "2026-01-01T00:00:00Z",
+  "filters": {
+    "status": "enable"
+  },
+  "total_rules": 6,
+  "filtered_rules": 6,
+  "rules": [
+    {
+      "seq": 1,
+      "id": 1,
+      "name": "acme-allow-dns",
+      "status": "enable",
+      "action": "accept",
+      "global_block": "",
+      "srcaddr": [
+        "ns-10.1.1.11"
+      ],
+      "dstaddr": [
+        "LAB-OT-OOB-10.2.3.0_24_global"
+      ],
+      "service": [
+        "DNS"
+      ],
+      "srcintf": [
+        "port1"
+      ],
+      "dstintf": [
+        "wan1"
+      ],
+      "comment": "TICKET-12341",
+      "implicit": false,
+      "fsso_groups": [],
+      "srcaddr_expanded": [],
+      "dstaddr_expanded": [],
+      "service_expanded": []
+    },
+    {
+      "seq": 2,
+      "id": 2,
+      "name": "acme-web-out",
+      "status": "enable",
+      "action": "accept",
+      "global_block": "",
+      "srcaddr": [
+        "h-10-1-1-12"
+      ],
+      "dstaddr": [
+        "srv_203.0.113.7"
+      ],
+      "service": [
+        "HTTPS"
+      ],
+      "srcintf": [
+        "VLAN100"
+      ],
+      "dstintf": [
+        "npu0_vlink0"
+      ],
+      "comment": "TICKET-12342",
+      "implicit": false,
+      "fsso_groups": [],
+      "srcaddr_expanded": [],
+      "dstaddr_expanded": [],
+      "service_expanded": []
+    },
+    {
+      "seq": 3,
+      "id": 3,
+      "name": "acme-mgmt",
+      "status": "enable",
+      "action": "accept",
+      "global_block": "",
+      "srcaddr": [
+        "GW_10.1.1.1_24"
+      ],
+      "dstaddr": [
+        "portal.acme.example.com"
+      ],
+      "service": [
+        "SSH"
+      ],
+      "srcintf": [
+        "mgmt"
+      ],
+      "dstintf": [
+        "internal1"
+      ],
+      "comment": "TICKET-12343",
+      "implicit": false,
+      "fsso_groups": [],
+      "srcaddr_expanded": [],
+      "dstaddr_expanded": [],
+      "service_expanded": []
+    },
+    {
+      "seq": 4,
+      "id": 4,
+      "name": "acme-ha",
+      "status": "enable",
+      "action": "accept",
+      "global_block": "",
+      "srcaddr": [
+        "H_10.1.1.7_22"
+      ],
+      "dstaddr": [
+        "NET_10.1.1.0/24"
+      ],
+      "service": [
+        "HTTPS"
+      ],
+      "srcintf": [
+        "ha1"
+      ],
+      "dstintf": [
+        "dmz"
+      ],
+      "comment": "TICKET-12344",
+      "implicit": false,
+      "fsso_groups": [],
+      "srcaddr_expanded": [],
+      "dstaddr_expanded": [],
+      "service_expanded": []
+    },
+    {
+      "seq": 5,
+      "id": 5,
+      "name": "acme-ssl",
+      "status": "enable",
+      "action": "accept",
+      "global_block": "",
+      "srcaddr": [
+        "all"
+      ],
+      "dstaddr": [
+        "172.16.5.0/24"
+      ],
+      "service": [
+        "ALL"
+      ],
+      "srcintf": [
+        "ssl.root"
+      ],
+      "dstintf": [
+        "lan"
+      ],
+      "comment": "TICKET-12345",
+      "implicit": false,
+      "fsso_groups": [],
+      "srcaddr_expanded": [],
+      "dstaddr_expanded": [],
+      "service_expanded": []
+    },
+    {
+      "seq": 6,
+      "id": 6,
+      "name": "acme-tun",
+      "status": "enable",
+      "action": "accept",
+      "global_block": "",
+      "srcaddr": [
+        "acme_users"
+      ],
+      "dstaddr": [
+        "MGMT-172.16.5.9"
+      ],
+      "service": [
+        "PING"
+      ],
+      "srcintf": [
+        "tunnel2"
+      ],
+      "dstintf": [
+        "x1",
+        "a1",
+        "loopback0"
+      ],
+      "comment": "TICKET-12346",
+      "implicit": false,
+      "fsso_groups": [],
+      "srcaddr_expanded": [],
+      "dstaddr_expanded": [],
+      "service_expanded": []
+    }
+  ]
+}
