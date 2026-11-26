@@ -140,6 +140,25 @@ ZonePolicyError: 4THealth API unavailable: policy_db.json not found
 
 ---
 
+## `policy_sanitize` exit codes (`/sanitize-policy`)
+
+| Exit | Meaning | What to do |
+|---|---|---|
+| `0` | Sanitized output written, verifier clean | Continue with `/review-policy` |
+| `2` | Bad input or arguments, missing/empty terms file, an internal collision check (two different originals would get the same fake — host-with-prefix names such as `10.1.1.7/24` or `H_10.1.1.7_22` no longer trigger it), map store or output write failure, or an internal error. Nothing is left on disk. | Read the fixed error line (it names only the exception class, never your data). Check the terms file exists, the export is valid JSON, and `--out-dir` is not inside the repo/OneDrive. For a collision, report it — do not work around it. |
+| `3` | The leak verifier found an original value in the sanitized output. Nothing was written. | Do not use any output. Report the JSON paths it lists (no values are printed) to the tool maintainers. |
+| `4` | `--strict` and `unmatched-identifiers` is non-zero. Interface names (`srcintf`/`dstintf` values and generic shapes such as `port1`, `wan1`, `VLAN100`, `npu0_vlink0`) are not counted. Nothing was written. | Extend the terms file (see below) and re-run. |
+
+`render-review` (`/review-policy`) exits `2` with `findings rejected (ReportError) code=<code>` when the findings JSON is invalid — for example `cli_not_allowed` (a fix was written as FortiGate CLI) or `severity`. Claude should fix the findings and re-run; the report is not written until they validate.
+
+`map-back` exits `2` with `output location not allowed` when `--output` is inside the repo or a synced folder (OneDrive, iCloud, Dropbox, Google Drive): choose a local folder such as `~/policy-mapped/`.
+
+### `unmatched-identifiers` is non-zero
+
+The count is the number of letter+digit identifiers (device names such as `fw01`, host codes such as `dc01`) left in the sanitized output that no term covered. They may be real names. Add the site/device prefixes to `~/.config/4tanalyst/sanitize-terms.txt` (terms of 4+ characters also match inside longer words; shorter ones only as whole tokens) and re-run, ideally with `--strict` so nothing is written until the count is zero. The tool never prints which identifiers it found — check your own export locally, outside Claude.
+
+---
+
 ## Getting more detail from the servers
 
 To see server-level logs, run a server manually with logging enabled:

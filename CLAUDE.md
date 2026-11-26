@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Install all packages (run from repo root)
 uv pip install -e mcp_common/ -e standards_mcp/ -e fortimanager_mcp/ -e feedback_mcp/ \
-    -e intake_mcp/ -e zone_mcp/ -e planner/ -e psirt/ -e psirt_mcp/ -e hygiene/ -e hygiene_mcp/ \
+    -e intake_mcp/ -e zone_mcp/ -e planner/ -e psirt/ -e psirt_mcp/ -e hygiene/ -e hygiene_mcp/ -e policy_sanitize/ \
     -e fwanalyst_server/
 
 # Run the deterministic planner directly (no LLM, no server needed)
@@ -70,6 +70,7 @@ python -m fwanalyst_server.admin create-user <username> --role admin|viewer
 | `zone_mcp` | **Complete** | Live 4THealth zone policy API (IP→zone + verdict) |
 | `psirt` / `psirt_mcp` | **New** | Deterministic PSIRT advisory assessment — matches Fortinet advisory version ranges + workarounds against the live fleet (FortiGate + FortiManager), exploit-aware priority scoring, HTML report. No auto-remediation. |
 | `hygiene` / `hygiene_mcp` | **New** | Deterministic Rule Hygiene fix assessment — parses a completed hygiene run's JSON/CSV findings, cross-references the live policy package, and generates per-finding FortiGate CLI remediation. No auto-remediation. HTML report. |
+| `policy_sanitize` | **New** | Stdlib-only offline sanitizer for Rule Review policy JSON exports — replaces real IPv4/IPv6 addresses, hostnames and terms with consistent fakes, keeps a local map for map-back, verifies no leaks (fail-closed). Run locally; Claude never reads the raw export. `render-review` renders `/review-policy` findings as a self-contained HTML report under `output/policy-review/`. |
 | `mcp_common` | **Complete** | Shared input validation, sanitized errors, and log masking used by fortimanager_mcp |
 | `netbrain_mcp` | **Planned** | Automated path discovery — blocked on NetBrain API access |
 
@@ -316,6 +317,8 @@ Top blockers:
 - `/missing-info` — triage incomplete requests and draft follow-up
 - `/analyze-psirt` — assess a Fortinet PSIRT advisory email against the fleet: per-device no-action/config-change/upgrade verdict, exploit-aware priority, HTML report under `output/`
 - `/analyze-hygiene` — turn a completed Rule Hygiene run's findings into deterministic FortiGate CLI remediation per finding, with an HTML report under `output/hygiene/`
+- `/sanitize-policy` — locally sanitize a Rule Review policy JSON export (raw file never read by Claude)
+- `/review-policy` — ranked risk review of a sanitized policy export; Claude writes findings JSON and `render-review` produces the HTML report `output/policy-review/policy-review-<run-id>.html`
 
 ## Phase roadmap (revised)
 

@@ -1,0 +1,189 @@
+{
+  "package": "acme_pkg_synthetic",
+  "adom": "acme-adom",
+  "generated": "2026-01-01T00:00:00Z",
+  "filters": {
+    "status": "enable"
+  },
+  "total_rules": 6,
+  "filtered_rules": 6,
+  "rules": [
+    {
+      "seq": 1,
+      "id": 1,
+      "name": "acme-allow-dns",
+      "status": "enable",
+      "action": "accept",
+      "global_block": "",
+      "srcaddr": [
+        "ns-10.1.1.11"
+      ],
+      "dstaddr": [
+        "LAB-OT-OOB-10.2.3.0_24_global"
+      ],
+      "service": [
+        "DNS"
+      ],
+      "srcintf": [
+        "any"
+      ],
+      "dstintf": [
+        "any"
+      ],
+      "comment": "TICKET-12345 - (1);root:RULE_ID_1 - (1)",
+      "implicit": false,
+      "fsso_groups": [],
+      "srcaddr_expanded": [],
+      "dstaddr_expanded": [],
+      "service_expanded": []
+    },
+    {
+      "seq": 2,
+      "id": 2,
+      "name": "acme-web-out",
+      "status": "enable",
+      "action": "accept",
+      "global_block": "",
+      "srcaddr": [
+        "h-10-1-1-12"
+      ],
+      "dstaddr": [
+        "srv_203.0.113.7"
+      ],
+      "service": [
+        "HTTPS"
+      ],
+      "srcintf": [
+        "any"
+      ],
+      "dstintf": [
+        "any"
+      ],
+      "comment": "TICKET-12346 - (1);root:RULE_ID_2 - (1)",
+      "implicit": false,
+      "fsso_groups": [],
+      "srcaddr_expanded": [],
+      "dstaddr_expanded": [],
+      "service_expanded": []
+    },
+    {
+      "seq": 3,
+      "id": 3,
+      "name": "acme-fqdn",
+      "status": "enable",
+      "action": "accept",
+      "global_block": "",
+      "srcaddr": [
+        "h_10_1_1_13"
+      ],
+      "dstaddr": [
+        "portal.acme.example.com"
+      ],
+      "service": [
+        "HTTPS"
+      ],
+      "srcintf": [
+        "any"
+      ],
+      "dstintf": [
+        "any"
+      ],
+      "comment": "TICKET-12347 - (1);root:RULE_ID_3 - (1)",
+      "implicit": false,
+      "fsso_groups": [],
+      "srcaddr_expanded": [],
+      "dstaddr_expanded": [],
+      "service_expanded": []
+    },
+    {
+      "seq": 4,
+      "id": 4,
+      "name": "acme-users",
+      "status": "enable",
+      "action": "accept",
+      "global_block": "",
+      "srcaddr": [
+        "acme-users-net"
+      ],
+      "dstaddr": [
+        "10.2.3.0/24"
+      ],
+      "service": [
+        "ALL"
+      ],
+      "srcintf": [
+        "any"
+      ],
+      "dstintf": [
+        "any"
+      ],
+      "comment": "TICKET-12348 - (1);root:RULE_ID_4 - (1)",
+      "implicit": false,
+      "fsso_groups": [
+        "CN=Acme-Admins,DC=acme,DC=example,DC=com"
+      ],
+      "srcaddr_expanded": [],
+      "dstaddr_expanded": [],
+      "service_expanded": []
+    },
+    {
+      "seq": 5,
+      "id": 5,
+      "name": "acme-mgmt",
+      "status": "enable",
+      "action": "accept",
+      "global_block": "",
+      "srcaddr": [
+        "10.1.1.0/24"
+      ],
+      "dstaddr": [
+        "ns-10.1.1.11"
+      ],
+      "service": [
+        "SSH",
+        "tcp/8443"
+      ],
+      "srcintf": [
+        "any"
+      ],
+      "dstintf": [
+        "any"
+      ],
+      "comment": "TICKET-12349 - (1);root:RULE_ID_5 - (1)",
+      "implicit": false,
+      "fsso_groups": [],
+      "srcaddr_expanded": [],
+      "dstaddr_expanded": [],
+      "service_expanded": []
+    },
+    {
+      "seq": 6,
+      "id": 6,
+      "name": "acme-deny",
+      "status": "enable",
+      "action": "deny",
+      "global_block": "",
+      "srcaddr": [
+        "all"
+      ],
+      "dstaddr": [
+        "all"
+      ],
+      "service": [
+        "ALL"
+      ],
+      "srcintf": [
+        "any"
+      ],
+      "dstintf": [
+        "any"
+      ],
+      "comment": "TICKET-12350 - (1);root:RULE_ID_6 - (1)",
+      "implicit": false,
+      "fsso_groups": [],
+      "srcaddr_expanded": [],
+      "dstaddr_expanded": [],
+      "service_expanded": []
+    }
+  ]
+}

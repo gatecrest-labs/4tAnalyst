@@ -70,6 +70,27 @@ All credential paths can be overridden with environment variables. This is usefu
 
 ---
 
+## Policy export sanitizer (workstation)
+
+Used by `/sanitize-policy` and `/review-policy`; nothing on the central server.
+
+| Item | Default | Purpose |
+|---|---|---|
+| Terms file | `~/.config/4tanalyst/sanitize-terms.txt` (override with `--terms PATH`; `--no-terms` skips it with a warning) | Company/site names to scrub. One literal, case-insensitive term per line; optional `term=PLACEHOLDER`; `#` starts a comment. Terms of 4+ characters also match inside longer words; shorter terms only as whole tokens. Unnamed terms become `ORG`, then `SITE-1`, `SITE-2`, … |
+| Map directory | `~/.local/share/4tanalyst/sanitize/` | Local real-to-fake maps (`<run-id>.map.json`, mode 0600, directory 0700 when the tool creates it). Refused inside the repo or a synced folder (OneDrive, CloudStorage, iCloud/Mobile Documents, Dropbox, Google Drive). Maps expire after 30 days. |
+| `FW_ANALYST_SANITIZE_DIR` | *(unset)* | Environment variable overriding the map directory. A pre-existing directory keeps its own permissions. |
+| Export / output folders | `~/policy-exports/` (raw, renamed `export-*.json`), `~/policy-sanitized/` (sanitized), `output/policy-review/` (findings JSON + HTML report), `~/policy-mapped/` (map-back output, real values) | Conventions used by the skills. |
+
+Example terms file (invented values):
+
+```
+# company and site terms to scrub
+acme
+acme-hq=SITE_A
+```
+
+---
+
 ## Engineer workstations
 
 Engineers connect to the central server via Claude Code's MCP configuration. No credentials are stored on workstations.

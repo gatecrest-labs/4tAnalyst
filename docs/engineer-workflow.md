@@ -16,13 +16,14 @@ See [Web Admin Interface](web-admin.md) for full details.
 
 ## 1. Workstation setup
 
-You need three things on your laptop: Claude Code, a slim sparse-checkout of this repo, and a pointer to the central MCP server. You never install Python, credentials, or any MCP packages locally, and you never handle FortiManager/4THealth API keys — those live only on the central RHEL server (see `SECURITY.md`).
+You need three things on your laptop: Claude Code, a slim sparse-checkout of this repo, and a pointer to the central MCP server. You never install credentials or any MCP packages locally (Python 3.11+ and uv are needed only for the local `/sanitize-policy` workflow), and you never handle FortiManager/4THealth API keys — those live only on the central RHEL server (see `SECURITY.md`).
 
 ### Why a checkout is needed at all
 
 Two pieces of the workflow run locally on your laptop, not on the central server:
 - **Slash commands** (`/analyze-request`, `/check-policy`, etc.) — these are Claude Code project skills defined under `.claude/skills/`, which Claude Code only discovers when you run it from inside a directory containing that folder.
 - **Report rendering** — the final step of `/analyze-request` runs `scripts/render_report.py` locally to produce `report.html`/`implementation.conf` for ticket attachment. It's a stdlib-only script; no credentials or network calls involved.
+- **Policy-export sanitizing** — `/sanitize-policy` and `/review-policy` run the stdlib-only `policy_sanitize` package locally (sanitize, render the HTML review, map back). Raw exports and maps never leave your laptop.
 
 Everything else — zone verdicts, FortiManager rule search, naming/logging checks — happens on the central server over MCP; your laptop never touches that data directly.
 
@@ -33,8 +34,10 @@ Rather than a full clone, use a sparse checkout so you only pull down `.claude/`
 ```bash
 git clone --filter=blob:none --sparse <repo-url> 4tanalyst-workstation
 cd 4tanalyst-workstation
-git sparse-checkout set .claude scripts
+git sparse-checkout set .claude scripts policy_sanitize
 ```
+
+(`policy_sanitize` is only needed for `/sanitize-policy` / `/review-policy`.)
 
 Your team access to this repo should be **read-only** — engineers use the checkout, they don't push changes to skills or server code. If you spot a bug in a skill or the naming conventions it enforces, report it to the FW engineering team (see `CONTRIBUTING.md`) rather than editing your local copy.
 
@@ -185,6 +188,24 @@ After the peer review is complete and approvals are obtained, record the outcome
 ```
 
 This logs the approved/rejected/deferred decision, your engineer ID, the ticket number, and a justification to the feedback store. This record is used to track patterns and improve recommendations over time.
+
+---
+
+## Reviewing a policy export (sanitize, review, map back)
+
+Use this to get an AI review of a firewall rule set without exposing real identifiers.
+
+1. In 4thealth Rule Review, export the policy as JSON and save it under `~/policy-exports/`. The export's file name carries the real package name, so **rename it yourself** to a neutral name matching `export-<anything>.json` (for example `~/policy-exports/export-1.json`) before giving the path to Claude. `/sanitize-policy` stops if the name does not match. Do not open the file in Claude, and Claude will never move or rename it for you.
+2. Run `/sanitize-policy`. It runs `uv run python -m policy_sanitize sanitize` locally and reports a run id, the sanitized file path, and an `unmatched-identifiers` count. If the count is non-zero, extend `~/.config/4tanalyst/sanitize-terms.txt` (one term per line, optional `term=PLACEHOLDER`; terms of 4+ characters also match inside longer words) and re-run; `--strict` enforces this (exit 4, nothing written). Sanitized files go to `~/policy-sanitized/` (`--out-dir ~/policy-sanitized`).
+   Never put them under the export folder, the repo, or OneDrive.
+3. Run `/review-policy ~/policy-sanitized/sanitized-<run-id>-1.json`. Claude writes structured findings to `output/policy-review/<run-id>.findings.json` and renders them with `uv run python -m policy_sanitize render-review --input output/policy-review/<run-id>.findings.json --out-dir output/policy-review`. The deliverable is the self-contained HTML report `output/policy-review/policy-review-<run-id>.html` (no JavaScript, every value escaped). It contains only fake values.
+4. To see real values, map back locally to a directory outside the repo and OneDrive: `uv run python -m policy_sanitize map-back --run-id <run-id> --input output/policy-review/policy-review-<run-id>.html --output ~/policy-mapped/policy-review-<run-id>.html`. The mapped file contains real values. Never paste it into Claude or point a skill at `~/policy-mapped/` (both skills refuse it, and the fourth deny rule below blocks reads). `uv run python -m policy_sanitize purge` deletes maps older than 30 days.
+
+Recommended hardening: add these to `permissions.deny` in your own `~/.claude/settings.json`:
+
+```json
+["Read(~/policy-exports/**)", "Read(~/.local/share/4tanalyst/**)", "Read(~/.config/4tanalyst/**)", "Read(~/policy-mapped/**)"]
+```
 
 ---
 
@@ -423,3 +444,5 @@ In all cases: the engineer is accountable. Use the tool output as a research sta
 | `/missing-info` | Request is incomplete — drafts follow-up to requester |
 | `/analyze-psirt` | Fortinet PSIRT advisory — per-device verdict + exploit-aware priority + HTML report |
 | `/analyze-hygiene` | Rule Hygiene export — per-finding CLI remediation + HTML report |
+| `/sanitize-policy` | Rule Review policy export — sanitize locally before any AI review (rename to `export-*.json` first) |
+| `/review-policy <sanitized path>` | Sanitized export — ranked risk review, HTML report under `output/policy-review/` |

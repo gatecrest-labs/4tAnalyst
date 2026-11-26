@@ -193,6 +193,38 @@ Claude will prompt for the advisory email, extract the structured fields, and th
 
 ---
 
+### `/sanitize-policy` and `/review-policy` — Review a Rule Review policy export
+
+Gets a ranked risk review of a whole rule set without sending real identifiers to the model. The sanitizer (`policy_sanitize`, stdlib-only) runs locally on your workstation; Claude never reads the raw export.
+
+**What you need to have ready:**
+- The Rule Review policy JSON export, saved under `~/policy-exports/` and renamed by you to a neutral name such as `~/policy-exports/export-1.json` (the original file name contains the real package name)
+- A terms file at `~/.config/4tanalyst/sanitize-terms.txt` listing company/site names to scrub (see [Configuration](configuration.md#policy-export-sanitizer-workstation))
+
+```
+/sanitize-policy
+```
+
+Claude runs `uv run python -m policy_sanitize sanitize --input ~/policy-exports/export-1.json --out-dir ~/policy-sanitized --strict` and relays only the summary lines (run id, output path, counts, `verifier: clean`). Then:
+
+```
+/review-policy ~/policy-sanitized/sanitized-<run-id>-1.json
+```
+
+Claude reads only that sanitized file, writes findings to `output/policy-review/<run-id>.findings.json`, and runs `uv run python -m policy_sanitize render-review --input output/policy-review/<run-id>.findings.json --out-dir output/policy-review`. The report is `output/policy-review/policy-review-<run-id>.html` — severity-ranked (Critical → Low), fixes in words only, shadow/redundancy claims labelled `unverified — confirm with the hygiene checks`.
+
+To restore real values, run map-back yourself, outside Claude, to a folder outside the repo and OneDrive:
+
+```
+uv run python -m policy_sanitize map-back --run-id <run-id> \
+    --input output/policy-review/policy-review-<run-id>.html \
+    --output ~/policy-mapped/policy-review-<run-id>.html
+```
+
+The mapped report contains real values — never paste it into Claude. See [Engineer Workflow](engineer-workflow.md#reviewing-a-policy-export-sanitize-review-map-back) for the safety rules and recommended deny rules.
+
+---
+
 ## Typical workflow
 
 ```

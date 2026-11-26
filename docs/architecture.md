@@ -133,6 +133,12 @@ Fix generators cover: `unnamed` (rename), `disabled` (re-enable / exempt tag / d
 
 A VIP resolution fix to `AddressCatalog` (`fortimanager_mcp/matching.py`) was developed alongside this feature: `firewall/vip` objects (Central DNAT) are now resolved by `AddressCatalog` as valid `dstaddr` references, with their external IP decoded from FMG's variable `extip` encoding (single IP, hyphenated range, or list).
 
+### policy_sanitize (workstation-local, not an MCP server)
+
+Stdlib-only offline sanitizer for Rule Review policy JSON exports, used by `/sanitize-policy` and `/review-policy`. It runs on the engineer's workstation, never on the central server, and no MCP tool exposes it. `sanitize` remaps private IPv4 with a keyed prefix-preserving scheme (subnet structure survives), allocates public IPv4 and IPv6 from fake pools, replaces FQDNs and configured terms with placeholders, drops rule comments, then runs a fail-closed verifier that searches the output for every original value before anything is written. The real-to-fake map stays in a local 0600 store (`~/.local/share/4tanalyst/sanitize/`) for 30 days; `map-back` restores real values into a report locally. `render-review` turns the model's structured findings into a self-contained, escaped, JavaScript-free HTML report under `output/policy-review/`.
+
+Data flow: raw export (`~/policy-exports/export-*.json`) → `sanitize` (local) → `~/policy-sanitized/sanitized-<run-id>-<N>.json` → model review → findings JSON → `render-review` (local) → `output/policy-review/policy-review-<run-id>.html` → optional `map-back` (local, real values, never back to the model).
+
 ### netbrain_mcp — planned
 
 Network topology queries via the NetBrain API. This MCP server is not yet built — the NetBrain API integration details are TBD. When available, it will provide automated path discovery: given a source and destination IP, return the firewalls that sit in the traffic path.
@@ -185,6 +191,7 @@ Engineer: /analyze-request
 | 2 | FortiManager MCP, IP-to-zone mapper (zone_mcp) | Complete |
 | 2.5 | PSIRT advisory assessment (psirt / psirt_mcp / `/analyze-psirt`) | Complete |
 | 2.6 | Rule Hygiene fix assessment (hygiene / hygiene_mcp / `/analyze-hygiene`) | Complete |
+| 2.7 | Offline policy-export sanitizer and review (policy_sanitize / `/sanitize-policy` / `/review-policy`, HTML report) | Complete |
 | 3 | Deploy to team + feedback collection (4–8 weeks real data); recommendation engine + risk scorer; NetBrain topology integration (pending API details) | In progress |
 | 4 | Recommendation engine built on feedback data; Postgres migration; engineer identity (AD/Entra token) | Planned |
 | 5 | mTLS hardening, Ansible change preview, HA | Planned |

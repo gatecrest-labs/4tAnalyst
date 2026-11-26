@@ -39,6 +39,12 @@ python -m planner --src "10.1.2.3, 10.1.2.4" --dst 10.9.8.7 \
     --ticket CHG0012345 [--src-group GRP_VENDOR_X]
 ```
 
+Other workflows, each with its own slash command and HTML report:
+
+- `/analyze-psirt` — assess a Fortinet PSIRT advisory against the live fleet
+- `/analyze-hygiene` — turn a Rule Hygiene run's findings into per-finding CLI remediation
+- `/sanitize-policy` + `/review-policy` — sanitize a Rule Review policy export locally with the offline `policy_sanitize` package (real IPs, hostnames and site names replaced by consistent fakes; the raw export is never read by Claude), then get a ranked risk review as `output/policy-review/policy-review-<run-id>.html`. Map real values back locally with `uv run python -m policy_sanitize map-back`.
+
 **What it does not do:** push changes to firewalls, bypass peer review, or make decisions. All operations are read-only against the management APIs.
 
 **Important limitations:**
@@ -93,7 +99,7 @@ identity planned for Phase 4). Engineers never need direct API access.
 
 Running tests and CI
 
-- Unit tests: `pytest -q tests/` (planner, matching, insertion, engine, auth, and client tests — no live systems needed)
+- Unit tests: `pytest -q tests/` (planner, matching, insertion, engine, auth, client, and `policy_sanitize` tests — no live systems needed)
 - Smoke tests: `uv run python scripts/run_smoke.py` or `./scripts/smoke-test.sh` (asserts auth is enforced on port 8000)
 - CI: GitHub Actions runs `build-dev-image`, `unit-tests`, and `smoke-tests` on pushes and PRs to `main`.
 
