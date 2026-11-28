@@ -9,7 +9,7 @@ description = "Feedback MCP server — engineer decision capture, similarity loo
 requires-python = ">=3.11"
 dependencies = [
     "mcp[cli]>=2.3.0,<3.0.0",
-    "pyyaml>=6.0",
+    "pyyaml>=6.0.4",
 ]
 
 [project.scripts]
