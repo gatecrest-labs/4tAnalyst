@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Deterministic firewall change planner — computes change plans (objects, rules, insertion point, CLI) without an LLM"
 requires-python = ">=3.11"
 dependencies = [
-    "pyyaml>=6.0",
+    "pyyaml>=6.0.4",
     "httpx>=0.28.1",
     "requests>=2.34.2",
 ]
